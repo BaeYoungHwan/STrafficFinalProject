@@ -1,0 +1,7 @@
+venv/
+__pycache__/
+.env
+*.pt
+*.onnx
+*.mp4
+captured_images/
