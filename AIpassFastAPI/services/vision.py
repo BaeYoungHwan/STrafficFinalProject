@@ -5,8 +5,8 @@ import numpy as np
 import queue
 import asyncio
 import multiprocessing
-from multiprocessing import Process, Queue, shared_memory
-from multiprocessing.synchronize import Lock, Event
+from multiprocessing import Process, Queue, shared_memory, Lock, Event
+
 from ultralytics import YOLO
 from core.config import settings
 
@@ -148,3 +148,5 @@ class VisionEngine:
             if self.reader_process.is_alive():
                 logger.warning("[Vision] Worker process did not terminate gracefully. Forcing kill.")
                 self.reader_process.terminate() # 최후의 수단
+                
+vision_engine = VisionEngine(rtsp_url="0")

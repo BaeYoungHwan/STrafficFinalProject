@@ -58,3 +58,64 @@
 - 최적화 방안: 매 프레임 분석 대신 3 Frame-skip 적용, 비동기(Async) 처리로 OCR과 영상 스트리밍 분리
 
 ======================================================================
+
+
+
+# AI-Pass_FastAPI_Core_Plan.md
+
+## 1. 계획서 : 무엇을 만들 것인가 (FastAPI AI 비전 코어 설계도)
+
+본 문서는 전체 아키텍처 중 AI 파트가 전담하는 **FastAPI 서버**의 내부 모듈 및 데이터 처리 파이프라인 설계에 집중한 상세 기획서입니다.
+
+### 1.1. 시스템 구조 및 설계 패턴
+* **패턴:** 관심사 분리(SoC)를 위한 Router-Service-Core 아키텍처 적용
+* **입력:** CCTV RTSP 스트림 및 IoT 센서 데이터
+* **출력:** Spring Boot 백엔드 대상 비동기 HTTP 전송 (`httpx` 활용)
+
+
+
+### 1.2. 핵심 모듈별 구현 계획
+* **[모듈 1] Stream Ingestion & Inference (영상 수집 및 추론)**
+  * `cv2.VideoCapture`를 별도 Thread 또는 비동기 워커로 분리하여 메인 Event Loop 블로킹 방지.
+  * **YOLOv8 & DeepSORT:** 프레임 단위 객체 탐지 및 고유 ID 부여 (차량 중복 카운팅 방지).
+* **[모듈 2] Event Aggregator (이벤트 집계 및 타이머)**
+  * **혼잡도 (Flow A):** 메모리 변수(또는 경량 Redis)를 활용해 2분간 객체 통과 횟수 누적 후 스케줄러가 주기적 전송.
+  * **예지보전 센서:** 수신된 센서 데이터를 1분 단위 이동평균(Moving Average)으로 계산하여 임계치 초과 여부 판단.
+* **[모듈 3] Violation & OCR Processor (위반 처리 및 텍스트 추출)**
+  * 위반 이벤트 탐지 시 원본/Crop 프레임 버퍼링.
+  * Boto3(또는 커스텀 클라이언트)를 이용한 **비동기 S3/File Server 업로드**.
+  * EasyOCR/Tesseract를 통한 비동기 번호판 추출 후, 이미지 URL과 묶어 최종 JSON 페이로드 생성.
+* **[모듈 4] HTTP Client & Retry Queue (통신 및 재시도 큐)**
+  * `httpx.AsyncClient`를 통한 백엔드 REST API 비동기 호출 (`/api/v1/…`).
+  * 4xx, 5xx 에러 또는 Timeout 발생 시 Python 내부 `asyncio.Queue`에 페이로드 적재.
+  * Background Worker가 지수 백오프(Exponential Backoff)를 적용하여 백엔드 복구 시 자동 재전송 수행.
+
+---
+
+## 2. 맥락 노트 : 왜 이렇게 결정했는가 (FastAPI 기술 시방서)
+
+* **왜 `httpx` 비동기 클라이언트를 사용하는가?**
+  * 백엔드 API 응답 대기 시간(Network I/O) 동안 AI 모델 추론(CPU/GPU 연산)이 멈추는 것을 방지하기 위해, 동기적인 `requests` 대신 완전한 비동기 지원을 하는 `httpx`를 채택했습니다.
+* **왜 영상 처리를 메인 비동기 루프에서 분리하는가?**
+  * FastAPI의 장점인 고성능 API 처리량을 유지하려면, OpenCV의 동기적(Synchronous) 영상 프레임 읽기 작업이 메인 루프를 멈추게(Blocking) 해서는 안 되기 때문입니다.
+* **재시도 큐(Retry Queue)를 왜 `asyncio.Queue`로 우선 구현하는가?**
+  * 초기 단계에서는 인프라 복잡도(RabbitMQ, Kafka 등 외부 브로커 도입)를 낮추고, 가벼운 메모리 기반 큐로 구현하여 빠른 프로토타이핑을 진행하기 위함입니다. 추후 관제 교차로 수가 늘어나면 외부 Message Broker로 전환할 수 있도록 인터페이스를 분리해 설계합니다.
+* **위반 이미지 처리(OCR, 업로드)를 왜 비동기/백그라운드로 설계했는가?**
+  * S3 업로드와 OCR 추론은 시간이 다소 소요되는 작업입니다. 긴급 차량(Flow C) 처리가 1초라도 지연되지 않도록, 위반 처리 건은 백그라운드 태스크(BackgroundTasks)로 던져 병렬 처리합니다.
+
+---
+
+## 3. 체크리스트 : 뭘 끝냈고 뭐가 남았는가 (FastAPI 파트 공정표)
+
+### [완료] 기획 및 설계 단계 (Phase 1)
+- [x] FastAPI 코어 서버의 디렉토리 구조(Router/Service/Core) 설계 완료
+- [x] I/O 블로킹 방지를 위한 비동기 추론 파이프라인 기획 완료
+- [x] 재시도 큐 및 데이터 어그리게이션(집계) 전략 수립 완료
+
+### [대기] 모듈별 단위 구현 단계 (Phase 3 - 피드백 반영 후 진행)
+- [ ] `core/`: FastAPI 앱 초기화, Config 관리, ML 모델 로더(Lifespan 이벤트) 세팅
+- [ ] `services/vision.py`: RTSP 수신, YOLOv8/DeepSORT 추론 로직 작성
+- [ ] `services/ocr_storage.py`: 비동기 파일 서버 업로드 및 번호판 OCR 추출 로직 작성
+- [ ] `services/aggregator.py`: 2분 혼잡도, 1분 센서 데이터 집계용 백그라운드 스케줄러 작성
+- [ ] `utils/http_client.py`: 백엔드 전송 및 비동기 Retry Queue(지수 백오프) 구현
+
