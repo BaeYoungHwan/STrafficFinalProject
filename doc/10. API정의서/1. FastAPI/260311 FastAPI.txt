@@ -1,0 +1,60 @@
+======================================================================
+[AI-Pass] 스마트 교차로 FastAPI 비전 코어 서버 기획 및 설계서
+작성자: 배영환 (AI 비전 코어 총괄 PM)
+작성일: 2026-03-11
+======================================================================
+
+1. 시스템 개요 (Overview)
+- 목적: 실시간 CCTV 영상을 분석하여 교차로 혼잡도를 측정하고, 위반/긴급 차량을 식별하여 메인 웹 서버(Spring Boot)로 데이터를 공급하는 백그라운드 AI 엔진.
+- 핵심 기술 스택: Python 3.11, FastAPI, Uvicorn, YOLOv8(객체 추적), PaddleOCR(번호판 추출), OpenCV(영상 처리)
+
+2. 주요 파이프라인 흐름 (Data Flow)
+- [Input]: ITS 공공 API 실시간 스트리밍 URL (m3u8) 또는 로컬 테스트 mp4 영상
+- [Process 1]: YOLOv8 객체 탐지 및 ByteTrack 알고리즘을 통한 차량 ID 부여/추적
+- [Process 2]: 가상 차선(Line) 통과 시 방향별 카운팅 (2분 단위 집계)
+- [Process 3]: 가상 속도 계산(픽셀 이동량) 및 위반 차량 프레임 캡처
+- [Process 4]: PaddleOCR을 통한 캡처 이미지 내 번호판 텍스트(ex. 12가3456) 추출
+- [Output]: Spring Boot REST API로 JSON 데이터 HTTP POST 전송
+
+3. API 엔드포인트 설계 (API-First Design)
+
+  3.1 실시간 영상 스트리밍 제공 (프론트엔드 연동용)
+  - [GET] /api/stream
+  - 응답 형식: multipart/x-mixed-replace (MJPEG Stream)
+  - 내용: YOLO Bounding Box가 그려진 실시간 분석 화면을 Vue.js로 송출
+
+  3.2 2분 단위 혼잡도 데이터 전송 (Spring Boot 연동용)
+  - [POST] http://[SpringBoot주소]/api/traffic/count
+  - 전송 데이터 포맷 (JSON):
+    {
+      "timestamp": "2026-03-11T12:00:00",
+      "direction": "NORTH",
+      "car_count": 45,
+      "bus_count": 3
+    }
+
+  3.3 위반 단속 데이터 전송 (Spring Boot 연동용)
+  - [POST] http://[SpringBoot주소]/api/violation
+  - 전송 데이터 포맷 (JSON):
+    {
+      "timestamp": "2026-03-11T12:05:30",
+      "violation_type": "SPEEDING",
+      "estimated_speed": 82,
+      "plate_number": "12가3456",
+      "image_base64": "iVBORw0KGgoAAAANSUhEUgAAAAE..." // 캡처된 증거 사진
+    }
+
+  3.4 긴급 차량(구급차 등) 감지 이벤트 전송
+  - [POST] http://[SpringBoot주소]/api/emergency
+  - 전송 데이터 포맷 (JSON):
+    {
+      "timestamp": "2026-03-11T12:10:00",
+      "vehicle_type": "AMBULANCE",
+      "status": "APPROACHING"
+    }
+
+4. 시스템 성능 및 최적화 목표
+- 목표 FPS: 최소 15~20 FPS 유지 (실시간 관제 무리 없는 수준)
+- 최적화 방안: 매 프레임 분석 대신 3 Frame-skip 적용, 비동기(Async) 처리로 OCR과 영상 스트리밍 분리
+
+======================================================================
