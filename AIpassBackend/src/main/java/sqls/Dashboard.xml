@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+  PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.aipass.dao.DashboardDao">
+
+    <select id="getDashboardSummary" resultType="com.aipass.dto.DashboardDto">
+        WITH today_data AS (
+            SELECT COALESCE(SUM(vehicle_count), 0) AS total
+            FROM traffic_congestion
+            WHERE DATE(recorded_at) = CURRENT_DATE
+        ),
+        yesterday_data AS (
+            SELECT COALESCE(SUM(vehicle_count), 0) AS total
+            FROM traffic_congestion
+            WHERE DATE(recorded_at) = CURRENT_DATE - INTERVAL '1 day'
+        ),
+        latest_sensor AS (
+            SELECT DISTINCT ON (equipment_id)
+                   equipment_id,
+                   risk_score,
+                   recorded_at
+            FROM sensor_log
+            ORDER BY equipment_id, recorded_at DESC
+        )
+        SELECT
+            (SELECT total FROM today_data) AS todayTrafficTotal,
+            CASE
+                WHEN (SELECT total FROM yesterday_data) = 0 THEN 0
+                ELSE ROUND(
+                    (
+                        ((SELECT total FROM today_data) - (SELECT total FROM yesterday_data)) * 100.0
+                        / NULLIF((SELECT total FROM yesterday_data), 0)
+                    )::numeric,
+                    1
+                )
+            END AS trafficChangeRate,
+            (
+                SELECT COUNT(*)
+                FROM violation_log
+                WHERE fine_status = 'UNPROCESSED'
+            ) AS unprocessedCount,
+            (
+                SELECT COUNT(*)
+                FROM latest_sensor
+                WHERE risk_score >= 0.60
+            ) AS riskEquipmentCount
+    </select>
+
+    <select id="getTrafficTrend" resultType="int">
+        WITH days AS (
+            SELECT generate_series(
+                CURRENT_DATE - INTERVAL '6 day',
+                CURRENT_DATE,
+                INTERVAL '1 day'
+            )::date AS day
+        )
+        SELECT COALESCE(SUM(tc.vehicle_count), 0)::int
+        FROM days d
+        LEFT JOIN traffic_congestion tc
+               ON DATE(tc.recorded_at) = d.day
+        GROUP BY d.day
+        ORDER BY d.day
+    </select>
+
+    <select id="getRecentAlerts" resultType="string">
+        SELECT alert_text
+        FROM (
+            SELECT
+                v.detected_at AS event_time,
+                '[' || TO_CHAR(v.detected_at, 'HH12:MI AM') || '] '
+                || COALESCE(v.plate_number, '번호판 미확인')
+                || ' '
+                || v.violation_type
+                || ' / '
+                || COALESCE(i.name, '교차로 미확인') AS alert_text
+            FROM violation_log v
+            JOIN intersection i
+              ON v.intersection_id = i.intersection_id
+
+            UNION ALL
+
+            SELECT
+                s.created_at AS event_time,
+                '[' || TO_CHAR(s.created_at, 'HH12:MI AM') || '] '
+                || '신호 제어 - '
+                || COALESCE(i.name, '교차로 미확인')
+                || ': '
+                || s.control_type AS alert_text
+            FROM signal_control_log s
+            JOIN intersection i
+              ON s.intersection_id = i.intersection_id
+        ) alerts
+        ORDER BY event_time DESC
+        LIMIT 5
+    </select>
+
+</mapper>

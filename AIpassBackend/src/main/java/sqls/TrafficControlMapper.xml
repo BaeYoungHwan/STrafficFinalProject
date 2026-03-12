@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+  PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.aipass.dao.TrafficControlDao">
+
+    <insert id="insertSignalControlLog" parameterType="com.aipass.dto.SignalControlRequestDto">
+        INSERT INTO signal_control_log (
+            intersection_id,
+            control_type,
+            control_reason
+        )
+        VALUES (
+            #{intersectionId},
+            #{controlType},
+            #{controlReason}
+        )
+    </insert>
+
+</mapper>

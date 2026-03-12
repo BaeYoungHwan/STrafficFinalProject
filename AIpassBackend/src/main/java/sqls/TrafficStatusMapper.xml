@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+  PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.aipass.dao.TrafficStatusDao">
+
+    <resultMap id="trafficStatusMap" type="com.aipass.dto.TrafficStatusDto">
+        <result property="temperature" column="temperature" />
+        <result property="vibration" column="vibration" />
+        <result property="riskScore" column="risk_score" />
+        <result property="signalPercent" column="signal_percent" />
+        <result property="signalState" column="signal_state" />
+        <result property="cameraPercent" column="camera_percent" />
+        <result property="cameraState" column="camera_state" />
+        <result property="operationStatus" column="operation_status" />
+        <result property="failureRisk" column="failure_risk" />
+        <result property="lastMaintenanceText" column="last_maintenance_text" />
+    </resultMap>
+
+    <select id="getTrafficStatus" resultMap="trafficStatusMap">
+        WITH latest_sensor AS (
+            SELECT DISTINCT ON (s.equipment_id)
+                   s.equipment_id,
+                   s.temperature,
+                   s.vibration,
+                   s.risk_score,
+                   s.recorded_at
+            FROM sensor_log s
+            ORDER BY s.equipment_id, s.recorded_at DESC
+        ),
+        signal_equipment AS (
+            SELECT ls.temperature,
+                   ls.vibration,
+                   ls.risk_score,
+                   ls.recorded_at
+            FROM latest_sensor ls
+            JOIN equipment e
+              ON ls.equipment_id = e.equipment_id
+            WHERE e.equipment_type IN ('PTZ_MOTOR', 'SIGNAL_CONTROLLER')
+            ORDER BY ls.recorded_at DESC
+            LIMIT 1
+        ),
+        camera_equipment AS (
+            SELECT ls.temperature,
+                   ls.vibration,
+                   ls.risk_score,
+                   ls.recorded_at
+            FROM latest_sensor ls
+            JOIN equipment e
+              ON ls.equipment_id = e.equipment_id
+            WHERE e.equipment_type = 'CAMERA'
+            ORDER BY ls.recorded_at DESC
+            LIMIT 1
+        ),
+        latest_maintenance AS (
+            SELECT m.created_at
+            FROM maintenance_log m
+            ORDER BY m.created_at DESC
+            LIMIT 1
+        )
+        SELECT
+            COALESCE((SELECT temperature FROM signal_equipment), 0) AS temperature,
+            COALESCE((SELECT vibration FROM signal_equipment), 0) AS vibration,
+            COALESCE((SELECT risk_score FROM signal_equipment), 0) AS risk_score,
+
+            GREATEST(
+                0,
+                LEAST(
+                    100,
+                    100 - CAST(COALESCE((SELECT risk_score FROM signal_equipment), 0) * 100 AS INTEGER)
+                )
+            ) AS signal_percent,
+
+            CASE
+                WHEN COALESCE((SELECT risk_score FROM signal_equipment), 0) &lt; 0.30 THEN '양호'
+                WHEN COALESCE((SELECT risk_score FROM signal_equipment), 0) &lt; 0.60 THEN '주의'
+                ELSE '위험'
+            END AS signal_state,
+
+            GREATEST(
+                0,
+                LEAST(
+                    100,
+                    100 - CAST(COALESCE((SELECT risk_score FROM camera_equipment), 0) * 100 AS INTEGER)
+                )
+            ) AS camera_percent,
+
+            CASE
+                WHEN COALESCE((SELECT risk_score FROM camera_equipment), 0) &lt; 0.30 THEN '양호'
+                WHEN COALESCE((SELECT risk_score FROM camera_equipment), 0) &lt; 0.60 THEN '주의'
+                ELSE '위험'
+            END AS camera_state,
+
+            CASE
+                WHEN COALESCE((SELECT risk_score FROM camera_equipment), 0) &lt; 0.60 THEN '양호'
+                ELSE '점검필요'
+            END AS operation_status,
+
+            CASE
+                WHEN COALESCE((SELECT risk_score FROM camera_equipment), 0) &lt; 0.30 THEN '낮음'
+                WHEN COALESCE((SELECT risk_score FROM camera_equipment), 0) &lt; 0.60 THEN '중간'
+                ELSE '높음'
+            END AS failure_risk,
+
+            CASE
+                WHEN (SELECT created_at FROM latest_maintenance) IS NULL THEN '정보 없음'
+                ELSE
+                    CAST(
+                        CAST(
+                            DATE_PART('day', CURRENT_TIMESTAMP - (SELECT created_at FROM latest_maintenance))
+                            AS INTEGER
+                        ) AS TEXT
+                    ) || '일 전'
+            END AS last_maintenance_text
+    </select>
+
+</mapper>

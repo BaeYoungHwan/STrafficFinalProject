@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+  PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+    PriorityRouteMapper
+    교차로 ID로 intersection 테이블 조회
+-->
+
+<mapper namespace="com.aipass.dao.PriorityRouteDao">
+
+    <resultMap id="priorityRouteIntersectionMap"
+               type="com.aipass.dto.PriorityRouteIntersectionDto">
+
+        <result property="intersectionId" column="intersection_id"/>
+        <result property="intersectionName" column="intersection_name"/>
+        <result property="latitude" column="latitude"/>
+        <result property="longitude" column="longitude"/>
+
+    </resultMap>
+
+    <!-- 교차로 ID 조회 -->
+    <select id="getIntersectionById"
+            parameterType="long"
+            resultMap="priorityRouteIntersectionMap">
+
+        SELECT
+            intersection_id,
+            name AS intersection_name,
+            latitude,
+            longitude
+        FROM intersection
+        WHERE intersection_id = #{intersectionId}
+
+    </select>
+
+</mapper>

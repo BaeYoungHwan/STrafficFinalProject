@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+  PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.aipass.dao.TrafficIntersectionDao">
+
+    <resultMap id="intersectionBaseMap" type="com.aipass.dto.TrafficIntersectionDetailDto">
+        <result property="intersectionId" column="intersection_id" />
+        <result property="intersectionName" column="intersection_name" />
+        <result property="latitude" column="latitude" />
+        <result property="longitude" column="longitude" />
+        <result property="vehicleCount" column="vehicle_count" />
+        <result property="congestionLevel" column="congestion_level" />
+        <result property="congestionRecordedAt" column="congestion_recorded_at" />
+        <result property="temperature" column="temperature" />
+        <result property="vibration" column="vibration" />
+        <result property="riskScore" column="risk_score" />
+    </resultMap>
+
+    <resultMap id="equipmentMap" type="com.aipass.dto.TrafficIntersectionEquipmentDto">
+        <result property="equipmentId" column="equipment_id" />
+        <result property="equipmentType" column="equipment_type" />
+        <result property="status" column="status" />
+        <result property="installationDate" column="installation_date" />
+    </resultMap>
+
+    <resultMap id="signalLogMap" type="com.aipass.dto.TrafficIntersectionSignalLogDto">
+        <result property="controlId" column="control_id" />
+        <result property="controlType" column="control_type" />
+        <result property="controlReason" column="control_reason" />
+        <result property="createdAt" column="created_at" />
+    </resultMap>
+
+    <resultMap id="maintenanceMap" type="com.aipass.dto.TrafficIntersectionMaintenanceDto">
+        <result property="ticketId" column="ticket_id" />
+        <result property="equipmentId" column="equipment_id" />
+        <result property="repairStatus" column="repair_status" />
+        <result property="reportedBy" column="reported_by" />
+        <result property="createdAt" column="created_at" />
+        <result property="resolvedAt" column="resolved_at" />
+    </resultMap>
+
+    <select id="getIntersectionBaseInfo" parameterType="long" resultMap="intersectionBaseMap">
+        WITH latest_congestion AS (
+            SELECT tc.intersection_id,
+                   tc.vehicle_count,
+                   tc.congestion_level,
+                   TO_CHAR(tc.recorded_at, 'YYYY-MM-DD HH24:MI:SS') AS congestion_recorded_at
+            FROM traffic_congestion tc
+            WHERE tc.intersection_id = #{intersectionId}
+            ORDER BY tc.recorded_at DESC
+            LIMIT 1
+        ),
+        latest_sensor AS (
+            SELECT s.equipment_id,
+                   s.temperature,
+                   s.vibration,
+                   s.risk_score,
+                   s.recorded_at
+            FROM sensor_log s
+            JOIN equipment e
+              ON s.equipment_id = e.equipment_id
+            WHERE e.intersection_id = #{intersectionId}
+            ORDER BY s.recorded_at DESC
+            LIMIT 1
+        )
+        SELECT
+            i.intersection_id,
+            i.name AS intersection_name,
+            CAST(i.latitude AS DOUBLE PRECISION) AS latitude,
+            CAST(i.longitude AS DOUBLE PRECISION) AS longitude,
+            COALESCE((SELECT vehicle_count FROM latest_congestion), 0) AS vehicle_count,
+            COALESCE((SELECT congestion_level FROM latest_congestion), 'UNKNOWN') AS congestion_level,
+            COALESCE((SELECT congestion_recorded_at FROM latest_congestion), '-') AS congestion_recorded_at,
+            COALESCE((SELECT temperature FROM latest_sensor), 0) AS temperature,
+            COALESCE((SELECT vibration FROM latest_sensor), 0) AS vibration,
+            COALESCE((SELECT risk_score FROM latest_sensor), 0) AS risk_score
+        FROM intersection i
+        WHERE i.intersection_id = #{intersectionId}
+    </select>
+
+    <select id="getIntersectionEquipmentList" parameterType="long" resultMap="equipmentMap">
+        SELECT
+            e.equipment_id,
+            e.equipment_type,
+            e.status,
+            COALESCE(TO_CHAR(e.installation_date, 'YYYY-MM-DD'), '-') AS installation_date
+        FROM equipment e
+        WHERE e.intersection_id = #{intersectionId}
+        ORDER BY e.equipment_id
+    </select>
+
+    <select id="getIntersectionSignalLogList" parameterType="long" resultMap="signalLogMap">
+        SELECT
+            s.control_id,
+            s.control_type,
+            COALESCE(s.control_reason, '-') AS control_reason,
+            TO_CHAR(s.created_at, 'YYYY-MM-DD HH24:MI:SS') AS created_at
+        FROM signal_control_log s
+        WHERE s.intersection_id = #{intersectionId}
+        ORDER BY s.created_at DESC
+        LIMIT 5
+    </select>
+
+    <select id="getIntersectionMaintenanceList" parameterType="long" resultMap="maintenanceMap">
+        SELECT
+            m.ticket_id,
+            m.equipment_id,
+            m.repair_status,
+            COALESCE(m.reported_by, '-') AS reported_by,
+            TO_CHAR(m.created_at, 'YYYY-MM-DD HH24:MI:SS') AS created_at,
+            COALESCE(TO_CHAR(m.resolved_at, 'YYYY-MM-DD HH24:MI:SS'), '-') AS resolved_at
+        FROM maintenance_log m
+        JOIN equipment e
+          ON m.equipment_id = e.equipment_id
+        WHERE e.intersection_id = #{intersectionId}
+        ORDER BY m.created_at DESC
+        LIMIT 5
+    </select>
+
+</mapper>

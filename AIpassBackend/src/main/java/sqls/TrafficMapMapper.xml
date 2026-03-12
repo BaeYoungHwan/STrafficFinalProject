@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+  PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.aipass.dao.TrafficMapDao">
+
+    <resultMap id="trafficMapFlatMap" type="com.aipass.dto.TrafficMapFlatDto">
+        <result property="intersectionId" column="intersection_id" />
+        <result property="intersectionName" column="intersection_name" />
+        <result property="latitude" column="latitude" />
+        <result property="longitude" column="longitude" />
+        <result property="equipmentId" column="equipment_id" />
+        <result property="equipmentType" column="equipment_type" />
+        <result property="status" column="status" />
+    </resultMap>
+
+    <select id="getTrafficMapData" resultMap="trafficMapFlatMap">
+        SELECT
+            i.intersection_id,
+            i.name AS intersection_name,
+            CAST(i.latitude AS DOUBLE PRECISION) AS latitude,
+            CAST(i.longitude AS DOUBLE PRECISION) AS longitude,
+            e.equipment_id,
+            e.equipment_type,
+            e.status
+        FROM intersection i
+        LEFT JOIN equipment e
+          ON i.intersection_id = e.intersection_id
+        ORDER BY i.intersection_id, e.equipment_id
+    </select>
+
+</mapper>

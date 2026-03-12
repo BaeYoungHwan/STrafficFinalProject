@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.aipass.dao.ViolationRecordDao">
+
+    <sql id="searchCondition">
+        <where>
+            <if test="plateNumber != null and plateNumber != ''">
+                AND v.plate_number ILIKE CONCAT('%', #{plateNumber}, '%')
+            </if>
+
+            <if test="violationType != null and violationType != ''">
+                AND v.violation_type ILIKE CONCAT('%', #{violationType}, '%')
+            </if>
+
+            <if test="fineStatus != null and fineStatus != '' and fineStatus != 'ALL'">
+                AND v.fine_status = #{fineStatus}
+            </if>
+
+            <if test="intersectionName != null and intersectionName != ''">
+                AND i.name ILIKE CONCAT('%', #{intersectionName}, '%')
+            </if>
+        </where>
+    </sql>
+
+    <select id="findPage" parameterType="map" resultType="com.aipass.dto.ViolationRecordDto">
+        SELECT
+            v.violation_id AS violationId,
+            v.intersection_id AS intersectionId,
+            i.name AS intersectionName,
+            v.plate_number AS plateNumber,
+            v.violation_type AS violationType,
+            v.image_url AS imageUrl,
+            TO_CHAR(v.detected_at, 'YYYY-MM-DD HH24:MI:SS') AS detectedAt,
+            v.fine_status AS fineStatus,
+            v.is_corrected AS isCorrected
+        FROM violation_log v
+        JOIN intersection i
+          ON v.intersection_id = i.intersection_id
+        <include refid="searchCondition"/>
+        ORDER BY v.violation_id DESC
+        LIMIT #{size}
+        OFFSET #{offset}
+    </select>
+
+    <select id="count" parameterType="map" resultType="int">
+        SELECT COUNT(*)
+        FROM violation_log v
+        JOIN intersection i
+          ON v.intersection_id = i.intersection_id
+        <include refid="searchCondition"/>
+    </select>
+
+    <select id="findById" parameterType="long" resultType="com.aipass.dto.ViolationRecordDto">
+        SELECT
+            v.violation_id AS violationId,
+            v.intersection_id AS intersectionId,
+            i.name AS intersectionName,
+            v.plate_number AS plateNumber,
+            v.violation_type AS violationType,
+            v.image_url AS imageUrl,
+            TO_CHAR(v.detected_at, 'YYYY-MM-DD HH24:MI:SS') AS detectedAt,
+            v.fine_status AS fineStatus,
+            v.is_corrected AS isCorrected
+        FROM violation_log v
+        JOIN intersection i
+          ON v.intersection_id = i.intersection_id
+        WHERE v.violation_id = #{violationId}
+    </select>
+
+    <update id="approve" parameterType="long">
+        UPDATE violation_log
+        SET fine_status = 'APPROVED'
+        WHERE violation_id = #{violationId}
+    </update>
+
+    <update id="reject" parameterType="long">
+        UPDATE violation_log
+        SET fine_status = 'REJECTED'
+        WHERE violation_id = #{violationId}
+    </update>
+
+    <update id="markCorrected" parameterType="long">
+        UPDATE violation_log
+        SET is_corrected = TRUE
+        WHERE violation_id = #{violationId}
+    </update>
+
+</mapper>

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+    PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.aipass.dao.AdminUserDao">
+
+    <select id="login" parameterType="com.aipass.dto.AdminUserDto" resultType="com.aipass.dto.AdminUserDto">
+        SELECT
+            member_id AS memberId,
+            login_id AS loginId,
+            password,
+            name
+        FROM member
+        WHERE login_id = #{loginId}
+          AND password = #{password}
+    </select>
+
+    <select id="findByLoginId" parameterType="string" resultType="com.aipass.dto.AdminUserDto">
+        SELECT
+            member_id AS memberId,
+            login_id AS loginId,
+            password,
+            name
+        FROM member
+        WHERE login_id = #{loginId}
+    </select>
+
+    <insert id="insertAdminUser" parameterType="com.aipass.dto.AdminUserDto">
+        INSERT INTO member (
+            login_id,
+            password,
+            name
+        )
+        VALUES (
+            #{loginId},
+            #{password},
+            #{name}
+        )
+    </insert>
+
+</mapper>
