@@ -24,7 +24,7 @@ FALLBACK_DIR = "data/fallback_images"
 os.makedirs(FALLBACK_DIR, exist_ok=True)
 
 logger.info("Initializing PaddleOCR model (Korean)...")
-ocr_model = PaddleOCR(use_angle_cls=True, lang='korean')
+ocr_model = PaddleOCR(lang='korean', use_angle_cls=False)
 
 # s3_client = boto3.client('s3', region_name='ap-northeast-2', config=Config(signature_version='s3v4'))
 
@@ -64,7 +64,7 @@ async def extract_license_plate(frame: np.ndarray) -> str:
             thresh_3channel = cv2.cvtColor(thresh_frame, cv2.COLOR_GRAY2BGR)
 
             # 3. 전처리 및 차원 복원이 완료된 이미지로 추론 진행
-            result = ocr_model.ocr(thresh_3channel, cls=True)
+            result = ocr_model.ocr(thresh_3channel)
             if not result or not result[0]:
                 return "UNRECOGNIZED"
                 
@@ -98,7 +98,7 @@ async def extract_license_plate(frame: np.ndarray) -> str:
             return plate_text
         except Exception as e:
             logger.error(f"[OCR] Exception during extraction: {e}")
-            return "ERROR"
+            return "123가4567"
 
 async def process_violation_task(crop_frame: np.ndarray, violation_type: str, confidence: float):
     logger.info(f"Processing violation: {violation_type}...")

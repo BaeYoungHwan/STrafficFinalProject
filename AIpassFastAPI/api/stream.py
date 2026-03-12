@@ -1,32 +1,48 @@
-import cv2
 import asyncio
+import queue
+import logging
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from services.vision import vision_engine
-from core.config import settings
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
-async def generate_mjpeg_stream():
-    sleep_time = 1.0 / settings.STREAM_FPS_LIMIT
+async def mjpeg_generator():
+    logger.info("🟢 [Stream] 웹 브라우저가 실시간 영상에 접속했습니다!")
+    frame_count = 0
     
     while True:
-        frame = vision_engine.latest_annotated_frame
-        if frame is not None:
-            # [QA 해결 3.1] CPU 바운드 이미지 인코딩을 비동기 스레드로 오프로딩
-            ret, buffer = await asyncio.to_thread(
-                cv2.imencode, '.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70]
-            )
-            if ret:
-                frame_bytes = buffer.tobytes()
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-        
-        await asyncio.sleep(sleep_time)
+        try:
+            # 1. 큐에서 비동기로 프레임 꺼내기
+            frame_bytes = await asyncio.to_thread(vision_engine.mjpeg_queue.get, True, 1.0)
+            frame_count += 1
+            
+            # 30프레임마다 터미널에 생존 신고 (정상 송출 확인용)
+            if frame_count % 30 == 0:
+                logger.info(f"🟢 [Stream] 정상 송출 중... (누적 {frame_count} 프레임 전달 완료)")
+                
+            # 2. 브라우저 스트리밍 규격(더블 CRLF)에 맞게 송출
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n\r\n')
+                   
+        except queue.Empty:
+            # 큐가 비어있으면 아주 잠깐 대기 후 다시 시도
+            await asyncio.sleep(0.01)
+        except Exception as e:
+            logger.error(f"🔴 [Stream] 연결 종료 또는 에러 발생: {e}")
+            break
 
-@router.get("/stream", tags=["Streaming"])
-async def video_stream():
+@router.get("/video_feed", tags=["Streaming"])
+async def video_feed():
+    """[Web Demo] 실시간 교차로 AI 분석 영상 스트리밍"""
     return StreamingResponse(
-        generate_mjpeg_stream(),
-        media_type="multipart/x-mixed-replace; boundary=frame"
+        mjpeg_generator(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "Connection": "keep-alive" # 연결 유지 명시
+        }
     )

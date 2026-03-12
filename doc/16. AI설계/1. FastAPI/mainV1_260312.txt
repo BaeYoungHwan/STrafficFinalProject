@@ -6,7 +6,6 @@ import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, UploadFile, Form
-from fastapi.middleware.cors import CORSMiddleware # 🚨 [추가] CORS 미들웨어 임포트
 import numpy as np
 import cv2
 
@@ -42,17 +41,16 @@ async def lifespan(app: FastAPI):
         # 2. 통신 클라이언트(Retry Queue) 켜기
         await http_client.start()
         
-        # 3. 비전 엔진 프로세스 시작 (Process A, B 가동)
+        # 3. 비전 엔진 프로세스 시작
         vision_engine.start()
         
-        # 4. 비동기 이벤트 백그라운드 워커 등록 (Process C)
-        async def event_worker():
+        # 4. 비동기 추론 백그라운드 워커 등록
+        async def inference_worker():
             while True:
-                # 🚨 [수정] 무거운 inference_loop 대신 가벼운 event_loop 호출
-                await vision_engine.process_event_loop()
+                await vision_engine.process_inference_loop()
                 await asyncio.sleep(0.001) # 컨텍스트 스위칭 최소 양보
                 
-        asyncio.create_task(event_worker())
+        asyncio.create_task(inference_worker())
         
         # 5. 혼잡도 & 예지보전 센서 스케줄러 시작
         start_aggregators()
@@ -86,19 +84,6 @@ app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
     lifespan=lifespan
-)
-
-# 🚨 [추가] CORS 미들웨어 설정 (Spring Boot 프론트엔드 연동)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:8080",  # Spring Boot (Java) 포트
-        "http://localhost:3000",  # React / Vue 포트
-        "*"                       # 데모용 전체 허용
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
 )
 
 # API 라우터 등록
