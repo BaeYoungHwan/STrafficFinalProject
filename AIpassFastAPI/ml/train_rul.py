@@ -72,21 +72,37 @@ def train_rul_model(max_kaist: int = None,
         verbose=50,
     )
 
-    # ── 6. 예측 및 평가 ──
-    y_pred = model.predict(X_test_scaled)
-    # RUL은 음수가 될 수 없음
-    y_pred = np.maximum(y_pred, 0)
+    # ── 6. 예측 및 평가 (Train + Test 비교 → 과적합/과소적합 분석) ──
+    y_pred_train = np.maximum(model.predict(X_train_scaled), 0)
+    y_pred_test = np.maximum(model.predict(X_test_scaled), 0)
 
-    mae = mean_absolute_error(y_test, y_pred)
-    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-    r2 = r2_score(y_test, y_pred)
+    # Train 성능
+    train_mae = mean_absolute_error(y_train, y_pred_train)
+    train_rmse = np.sqrt(mean_squared_error(y_train, y_pred_train))
+    train_r2 = r2_score(y_train, y_pred_train)
+
+    # Test 성능
+    mae = mean_absolute_error(y_test, y_pred_test)
+    rmse = np.sqrt(mean_squared_error(y_test, y_pred_test))
+    r2 = r2_score(y_test, y_pred_test)
+
+    # 과적합/과소적합 분석
+    overfit_gap_r2 = train_r2 - r2
+    overfit_gap_mae = mae - train_mae
 
     print("\n" + "=" * 40)
     print("RUL 모델 평가 결과")
     print("=" * 40)
-    print(f"MAE  : {mae:.2f}일")
-    print(f"RMSE : {rmse:.2f}일")
-    print(f"R²   : {r2:.4f}")
+    print(f"[Train] MAE: {train_mae:.2f}일 | RMSE: {train_rmse:.2f}일 | R2: {train_r2:.4f}")
+    print(f"[Test]  MAE: {mae:.2f}일 | RMSE: {rmse:.2f}일 | R2: {r2:.4f}")
+    print(f"\n과적합 갭 (Train R2 - Test R2): {overfit_gap_r2:.4f}")
+    print(f"과적합 갭 (Test MAE - Train MAE): {overfit_gap_mae:.2f}일")
+    if overfit_gap_r2 > 0.15:
+        print("  >> 과적합 경향 감지: Train과 Test 성능 차이가 큽니다.")
+    elif train_r2 < 0.5:
+        print("  >> 과소적합 경향 감지: Train 성능 자체가 낮습니다.")
+    else:
+        print("  >> 적합도 양호: Train/Test 성능 균형이 좋습니다.")
 
     # ── 7. 교차 검증 ──
     print("\n5-Fold 교차 검증 중...")
@@ -119,10 +135,18 @@ def train_rul_model(max_kaist: int = None,
     print(f"  스케일러: {config.SCALER_RUL_PATH}")
 
     return {
-        "mae": mae,
-        "rmse": rmse,
-        "r2": r2,
+        "train_mae": train_mae,
+        "train_rmse": train_rmse,
+        "train_r2": train_r2,
+        "test_mae": mae,
+        "test_rmse": rmse,
+        "test_r2": r2,
+        "overfit_gap_r2": overfit_gap_r2,
+        "overfit_gap_mae": overfit_gap_mae,
         "cv_mae": cv_mae,
+        "cv_mae_std": cv_scores.std(),
+        "n_samples": len(X),
+        "n_features": len(feature_cols),
         "feature_importance": feat_importance,
         "model": model,
         "scaler": scaler,

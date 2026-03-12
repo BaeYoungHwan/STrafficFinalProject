@@ -1,13 +1,8 @@
 """
-3개 데이터셋 로딩 및 전처리 모듈 (v2 - 윈도우 슬라이딩 적용)
+3개 데이터셋 로딩 및 전처리 모듈
 1. Mendeley KAIST Ball Bearing → RUL 학습 (메인) + 온도 보정
 2. FEMTO / PRONOSTIA (IEEE PHM 2012) → RUL 패턴 학습 보조
 3. XJTU-SY Bearing Dataset → 고장모드 분류 학습
-
-변경사항 (v1 → v2):
-- KAIST: 파일당 1개 피처 → 윈도우 슬라이딩으로 파일당 N개 피처 (129 → ~10만)
-- XJTU-SY: 세그먼트 평균 → 세그먼트별 개별 피처 (수천 → 수만)
-- FEMTO: 변경 없음 (이미 파일당 2560 샘플로 적정)
 """
 import os
 import re
@@ -21,17 +16,9 @@ from tqdm import tqdm
 from . import config
 from .feature_engineering import extract_features, extract_features_from_segment
 
-# 윈도우 슬라이딩 파라미터
-KAIST_WINDOW_SIZE = 25600      # 1초 분량 (25.6kHz × 1초)
-KAIST_WINDOW_STRIDE = 25600    # 겹침 없이 1초 간격
-KAIST_MAX_WINDOWS_PER_FILE = 100  # 파일당 최대 윈도우 수 (메모리 제한)
-
-XJTU_WINDOW_SIZE = 2560        # FEMTO와 동일한 0.1초 윈도우
-XJTU_WINDOW_STRIDE = 2560      # 겹침 없이
-
 
 # ────────────────────────────────────────────────────────────
-# 1. Mendeley KAIST Ball Bearing (윈도우 슬라이딩 적용)
+# 1. Mendeley KAIST Ball Bearing
 # ────────────────────────────────────────────────────────────
 
 def _parse_kaist_filename(filename: str) -> datetime | None:
@@ -44,15 +31,15 @@ def _parse_kaist_filename(filename: str) -> datetime | None:
 
 def load_kaist_dataset(max_files: int = None) -> pd.DataFrame:
     """
-    Mendeley KAIST Ball Bearing 데이터 로딩 (윈도우 슬라이딩)
+    Mendeley KAIST Ball Bearing 데이터 로딩
 
     CSV 형식 (헤더 없음): vibration_h, vibration_v, temperature, ambient_temp
-    파일 하나 = 1시간 간격, 200만 행 → 윈도우로 분할하여 다수 피처 추출
+    파일 하나 = 1시간 간격 기록, 내부에 여러 샘플
 
     Returns:
-        DataFrame: 윈도우별 피처 + RUL(일)
+        DataFrame: 파일별 통계 피처 + RUL(일)
     """
-    print("[KAIST] 데이터 로딩 중 (윈도우 슬라이딩)...")
+    print("[KAIST] 데이터 로딩 중...")
     data_dir = config.KAIST_DIR
 
     csv_files = sorted(data_dir.glob("LogFile_*.csv"))
@@ -90,47 +77,30 @@ def load_kaist_dataset(max_files: int = None) -> pd.DataFrame:
         temperature = df["temp"].mean()
         ambient_temp = df["ambient_temp"].mean()
 
-        # RUL 계산 (일 단위) - 이 파일의 기준 RUL
+        # 파일 전체에서 피처 추출
+        feat = extract_features(
+            signal_h, signal_v,
+            config.KAIST_SAMPLING_RATE,
+            temperature=temperature,
+            ambient_temp=ambient_temp,
+        )
+
+        # RUL 계산 (일 단위)
         elapsed_days = (timestamp - start_time).total_seconds() / 86400
-        file_rul_days = max(0, total_life_days - elapsed_days)
+        rul_days = max(0, total_life_days - elapsed_days)
 
-        # 윈도우 슬라이딩으로 분할
-        n_samples = len(signal_h)
-        window_starts = list(range(0, n_samples - KAIST_WINDOW_SIZE + 1,
-                                   KAIST_WINDOW_STRIDE))
-
-        # 파일당 최대 윈도우 수 제한 (균등 샘플링)
-        if len(window_starts) > KAIST_MAX_WINDOWS_PER_FILE:
-            indices = np.linspace(0, len(window_starts) - 1,
-                                  KAIST_MAX_WINDOWS_PER_FILE, dtype=int)
-            window_starts = [window_starts[i] for i in indices]
-
-        for w_idx, start in enumerate(window_starts):
-            end = start + KAIST_WINDOW_SIZE
-            win_h = signal_h[start:end]
-            win_v = signal_v[start:end]
-
-            feat = extract_features(
-                win_h, win_v,
-                config.KAIST_SAMPLING_RATE,
-                temperature=temperature,
-                ambient_temp=ambient_temp,
-            )
-
-            # 같은 파일 내 윈도우는 동일한 RUL (1시간 내 변화 무시)
-            feat["rul_days"] = file_rul_days
-            feat["timestamp"] = timestamp
-            feat["source"] = "kaist"
-            rows.append(feat)
+        feat["rul_days"] = rul_days
+        feat["timestamp"] = timestamp
+        feat["source"] = "kaist"
+        rows.append(feat)
 
     result = pd.DataFrame(rows)
-    print(f"[KAIST] {len(result)}개 샘플 로딩 완료 "
-          f"(파일 {len(file_info)}개, 총 수명: {total_life_days:.1f}일)")
+    print(f"[KAIST] {len(result)}개 샘플 로딩 완료 (총 수명: {total_life_days:.1f}일)")
     return result
 
 
 # ────────────────────────────────────────────────────────────
-# 2. FEMTO / PRONOSTIA (IEEE PHM 2012) - 변경 없음
+# 2. FEMTO / PRONOSTIA (IEEE PHM 2012)
 # ────────────────────────────────────────────────────────────
 
 def _load_femto_bearing(bearing_dir: Path, max_files: int = None) -> pd.DataFrame:
@@ -160,7 +130,10 @@ def _load_femto_bearing(bearing_dir: Path, max_files: int = None) -> pd.DataFram
         feat = extract_features(signal_h, signal_v, config.FEMTO_SAMPLING_RATE)
 
         # RUL 비율 기반 계산 (마지막 파일 = RUL 0)
+        # FEMTO는 가속 수명 시험이므로 일 단위 변환 필요
+        # 실험 시간 기준으로 비율 계산 후 프로젝트 스케일에 맞게 변환
         remaining_ratio = (total_files - idx - 1) / total_files
+        # 일반 베어링 수명 ~30-60일로 스케일링
         rul_days = remaining_ratio * 45  # 45일 기준
 
         feat["rul_days"] = rul_days
@@ -205,11 +178,11 @@ def load_femto_dataset(max_files_per_bearing: int = None) -> pd.DataFrame:
 
 
 # ────────────────────────────────────────────────────────────
-# 3. XJTU-SY Bearing Dataset (세그먼트별 개별 피처 추출)
+# 3. XJTU-SY Bearing Dataset
 # ────────────────────────────────────────────────────────────
 
 def _load_xjtu_bearing(bearing_dir: Path, max_files: int = None) -> pd.DataFrame:
-    """단일 XJTU-SY 베어링 디렉토리 로딩 (세그먼트별 개별 피처)"""
+    """단일 XJTU-SY 베어링 디렉토리 로딩"""
     csv_files = sorted(bearing_dir.glob("*.csv"),
                        key=lambda f: int(f.stem) if f.stem.isdigit() else 0)
     if max_files:
@@ -231,24 +204,22 @@ def _load_xjtu_bearing(bearing_dir: Path, max_files: int = None) -> pd.DataFrame
         except Exception:
             continue
 
+        # 긴 신호는 세그먼트로 나누어 평균 피처 산출
+        segments = extract_features_from_segment(
+            signal_h, signal_v, config.XJTU_SAMPLING_RATE
+        )
+        # 세그먼트 피처 평균
+        feat = {}
+        for key in segments[0]:
+            feat[key] = np.mean([s[key] for s in segments])
+
         # RUL 비율 기반
         remaining_ratio = (total_files - idx - 1) / total_files
         rul_days = remaining_ratio * 45
 
-        # 윈도우 슬라이딩으로 세그먼트별 개별 피처 추출
-        n_samples = len(signal_h)
-        window_starts = list(range(0, n_samples - XJTU_WINDOW_SIZE + 1,
-                                   XJTU_WINDOW_STRIDE))
-
-        for start in window_starts:
-            end = start + XJTU_WINDOW_SIZE
-            win_h = signal_h[start:end]
-            win_v = signal_v[start:end]
-
-            feat = extract_features(win_h, win_v, config.XJTU_SAMPLING_RATE)
-            feat["rul_days"] = rul_days
-            feat["file_idx"] = idx
-            rows.append(feat)
+        feat["rul_days"] = rul_days
+        feat["file_idx"] = idx
+        rows.append(feat)
 
     return pd.DataFrame(rows)
 
@@ -260,7 +231,7 @@ def load_xjtu_dataset(max_files_per_bearing: int = None) -> pd.DataFrame:
     Returns:
         DataFrame: 피처 + failure_mode 라벨 + RUL
     """
-    print("[XJTU-SY] 데이터 로딩 중 (세그먼트별 피처 추출)...")
+    print("[XJTU-SY] 데이터 로딩 중...")
     all_dfs = []
 
     for condition_name, bearings in config.XJTU_FAILURE_MODES.items():

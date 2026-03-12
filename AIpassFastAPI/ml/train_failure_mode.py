@@ -94,7 +94,13 @@ def train_failure_mode_model(max_files_per_bearing: int = None,
     else:
         model.fit(X_train_scaled, y_train)
 
-    # ── 6. 예측 및 평가 ──
+    # ── 6. 예측 및 평가 (Train + Test 비교 → 과적합/과소적합 분석) ──
+    # Train 성능
+    y_pred_train = model.predict(X_train_scaled)
+    train_accuracy = accuracy_score(y_train, y_pred_train)
+    train_f1 = f1_score(y_train, y_pred_train, average="weighted")
+
+    # Test 성능
     y_pred = model.predict(X_test_scaled)
     y_pred_proba = model.predict_proba(X_test_scaled)
 
@@ -110,12 +116,23 @@ def train_failure_mode_model(max_files_per_bearing: int = None,
             y_test, y_pred_proba, multi_class="ovr", average="weighted"
         )
 
+    # 과적합/과소적합 분석
+    overfit_gap_acc = train_accuracy - accuracy
+    overfit_gap_f1 = train_f1 - f1
+
     print("\n" + "=" * 40)
     print("고장모드 분류 모델 평가 결과")
     print("=" * 40)
-    print(f"Accuracy : {accuracy:.4f}")
-    print(f"F1-Score : {f1:.4f}")
-    print(f"ROC-AUC  : {roc_auc:.4f}")
+    print(f"[Train] Accuracy: {train_accuracy:.4f} | F1: {train_f1:.4f}")
+    print(f"[Test]  Accuracy: {accuracy:.4f} | F1: {f1:.4f} | ROC-AUC: {roc_auc:.4f}")
+    print(f"\n과적합 갭 (Train Acc - Test Acc): {overfit_gap_acc:.4f}")
+    print(f"과적합 갭 (Train F1 - Test F1):   {overfit_gap_f1:.4f}")
+    if overfit_gap_acc > 0.10:
+        print("  >> 과적합 경향 감지: Train과 Test 성능 차이가 큽니다.")
+    elif train_accuracy < 0.7:
+        print("  >> 과소적합 경향 감지: Train 성능 자체가 낮습니다.")
+    else:
+        print("  >> 적합도 양호: Train/Test 성능 균형이 좋습니다.")
 
     # 분류 리포트
     target_names = list(label_encoder.classes_)
@@ -162,11 +179,25 @@ def train_failure_mode_model(max_files_per_bearing: int = None,
     print(f"  스케일러  : {config.SCALER_FM_PATH}")
     print(f"  라벨인코더: {config.LABEL_ENCODER_PATH}")
 
+    # 분류 리포트 문자열 저장용
+    cls_report_str = classification_report(y_test, y_pred, target_names=target_names)
+    cm_str = pd.DataFrame(cm, index=target_names, columns=target_names).to_string()
+
     return {
-        "accuracy": accuracy,
-        "f1_score": f1,
+        "train_accuracy": train_accuracy,
+        "train_f1": train_f1,
+        "test_accuracy": accuracy,
+        "test_f1": f1,
         "roc_auc": roc_auc,
+        "overfit_gap_acc": overfit_gap_acc,
+        "overfit_gap_f1": overfit_gap_f1,
         "cv_f1": cv_f1,
+        "cv_f1_std": cv_scores.std(),
+        "n_samples": len(X),
+        "n_features": len(feature_cols),
+        "class_distribution": pd.Series(y_raw).value_counts().to_string(),
+        "classification_report": cls_report_str,
+        "confusion_matrix": cm_str,
         "feature_importance": feat_importance,
         "model": model,
         "scaler": scaler,
