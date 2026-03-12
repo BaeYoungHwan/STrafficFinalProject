@@ -69,6 +69,52 @@ class SensorAggregator:
 traffic_aggregator = TrafficAggregator()
 sensor_aggregator = SensorAggregator()
 
+class CongestionEngine:
+    def __init__(self):
+        self.lock = asyncio.Lock()
+        self.entry_times = {} 
+        self.completed_dwell_times = [] 
+
+    async def record_entry(self, track_id: int):
+        async with self.lock:
+            if track_id not in self.entry_times:
+                self.entry_times[track_id] = time.time()
+
+    async def record_exit(self, track_id: int):
+        async with self.lock:
+            if track_id in self.entry_times:
+                dwell_time = time.time() - self.entry_times.pop(track_id)
+                self.completed_dwell_times.append(dwell_time)
+
+    async def analyze_congestion(self):
+        async with self.lock:
+            # 🚨 [QA 수정 2.2] 메모리 누수 방지용 좀비 ID 클린업 (5분 이상 경과된 데이터 강제 삭제)
+            current_time = time.time()
+            stale_keys = [t_id for t_id, entry_t in self.entry_times.items() if current_time - entry_t > 300]
+            for k in stale_keys:
+                del self.entry_times[k]
+                
+            if stale_keys:
+                logger.warning(f"[Congestion] Garbage collected {len(stale_keys)} zombie track IDs to free memory.")
+
+            if not self.completed_dwell_times:
+                return {"status": "원활", "avg_dwell_time": 0.0, "vehicle_count": 0}
+            
+            avg_dwell = sum(self.completed_dwell_times) / len(self.completed_dwell_times)
+            count = len(self.completed_dwell_times)
+            self.completed_dwell_times.clear() 
+
+        if avg_dwell > 20.0:
+            status = "정체"
+        elif avg_dwell > 10.0:
+            status = "서행"
+        else:
+            status = "원활"
+            
+        return {"status": status, "avg_dwell_time": round(avg_dwell, 2), "vehicle_count": count}
+
+congestion_engine = CongestionEngine()
+
 # [QA 반영 2.2] 백그라운드 태스크 고아 현상을 막기 위한 추적 리스트
 active_tasks = []
 
