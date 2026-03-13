@@ -1,5 +1,6 @@
 """
 고장모드 분류 모델 학습 - XGBoost / RandomForest Classification
+- 9개 센서 피처 기반 (DB 스키마 일치)
 - XJTU-SY 데이터셋 기반
 - PTZ 카메라 고장모드: bearing_wear(베어링 마모) / motor_overheat(모터 과열)
 """
@@ -16,16 +17,13 @@ from sklearn.ensemble import RandomForestClassifier
 from xgboost import XGBClassifier
 
 from . import config
-from .data_loader import load_failure_mode_dataset, get_feature_columns
 
 
-def train_failure_mode_model(max_files_per_bearing: int = None,
-                             use_xgboost: bool = True) -> dict:
+def train_failure_mode_model(use_xgboost: bool = True) -> dict:
     """
-    고장모드 분류 모델 학습
+    고장모드 분류 모델 학습 (전처리된 9피처 CSV 기반)
 
     Args:
-        max_files_per_bearing: 베어링당 최대 파일 수
         use_xgboost: True=XGBoost, False=RandomForest
 
     Returns:
@@ -37,13 +35,21 @@ def train_failure_mode_model(max_files_per_bearing: int = None,
     print("=" * 60)
 
     # ── 1. 데이터 로딩 ──
-    df = load_failure_mode_dataset(max_files_per_bearing=max_files_per_bearing)
+    if config.FM_CSV_V2_PATH.exists():
+        print(f"\n9피처 전처리 CSV 로딩: {config.FM_CSV_V2_PATH}")
+        df = pd.read_csv(config.FM_CSV_V2_PATH)
+        print(f"  {len(df)}개 샘플 로딩 완료 (9피처)")
+    else:
+        raise FileNotFoundError(
+            f"전처리 CSV가 없습니다: {config.FM_CSV_V2_PATH}\n"
+            f"  → python -m ml.preprocess_9feat 먼저 실행하세요."
+        )
 
     if df.empty:
         raise ValueError("고장모드 분류 학습 데이터를 불러올 수 없습니다.")
 
     # ── 2. 피처/타겟 분리 ──
-    feature_cols = get_feature_columns(df)
+    feature_cols = [c for c in config.FEATURE_COLUMNS_9 if c in df.columns]
     X = df[feature_cols].copy()
     y_raw = df["failure_mode"].copy()
 
@@ -160,9 +166,9 @@ def train_failure_mode_model(max_files_per_bearing: int = None,
     feat_importance = sorted(
         zip(feature_cols, importance), key=lambda x: x[1], reverse=True
     )
-    print("\n상위 10 피처 중요도:")
-    for name, imp in feat_importance[:10]:
-        print(f"  {name:30s} : {imp:.4f}")
+    print("\n피처 중요도:")
+    for name, imp in feat_importance:
+        print(f"  {name:20s} : {imp:.4f}")
 
     # ── 9. 모델 저장 ──
     if use_xgboost:
@@ -211,6 +217,9 @@ def predict_failure_mode(features: dict, model=None, scaler=None,
                          use_xgboost: bool = True) -> dict:
     """
     단일 샘플에 대한 고장모드 분류 (추론용)
+
+    Args:
+        features: 9개 센서 피처 딕셔너리
 
     Returns:
         dict: failure_mode, confidence, probabilities

@@ -1,6 +1,6 @@
 """
 예지보전 모델 학습 설정
-- 데이터셋 경로, 피처 파라미터, 모델 하이퍼파라미터
+- 데이터셋 경로, 9개 센서 피처, 모델 하이퍼파라미터
 """
 from pathlib import Path
 
@@ -16,9 +16,22 @@ FEMTO_DIR = DATASET_ROOT / "10. FEMTO Bearing" / "FEMTOBearingDataSet"
 # XJTU-SY Bearing Dataset (고장모드 라벨 존재)
 XJTU_DIR = DATASET_ROOT / "XJTU-SY_Bearing_Datasets" / "Data" / "XJTU-SY_Bearing_Datasets"
 
+# ── 전처리 CSV 저장 경로 ──
+PREPROCESSED_DIR = DATASET_ROOT / "preprocessed"
+RUL_CSV_V2_PATH = PREPROCESSED_DIR / "rul_dataset_9feat.csv"
+FM_CSV_V2_PATH = PREPROCESSED_DIR / "failure_mode_dataset_9feat.csv"
+
 # ── 모델 저장 경로 ──
 MODEL_DIR = Path(__file__).parent / "models"
 MODEL_DIR.mkdir(exist_ok=True)
+
+# ── 결과 저장 폴더 ──
+TRAINING_DIR = MODEL_DIR / "training"
+TRAINING_DIR.mkdir(exist_ok=True)
+VALIDATION_DIR = MODEL_DIR / "validation"
+VALIDATION_DIR.mkdir(exist_ok=True)
+VALIDATION_CSV_DIR = MODEL_DIR / "validation_csv"
+VALIDATION_CSV_DIR.mkdir(exist_ok=True)
 
 RUL_MODEL_PATH = MODEL_DIR / "rul_xgboost.json"
 FAILURE_MODE_MODEL_PATH = MODEL_DIR / "failure_mode_model.json"
@@ -26,16 +39,31 @@ SCALER_RUL_PATH = MODEL_DIR / "scaler_rul.pkl"
 SCALER_FM_PATH = MODEL_DIR / "scaler_fm.pkl"
 LABEL_ENCODER_PATH = MODEL_DIR / "label_encoder.pkl"
 
-# ── 피처 추출 파라미터 ──
-# FEMTO: 샘플링 주파수 25.6kHz, 파일당 2560 샘플 (0.1초)
-FEMTO_SAMPLING_RATE = 25600
-# XJTU-SY: 샘플링 주파수 25.6kHz
-XJTU_SAMPLING_RATE = 25600
-# KAIST: 파일당 샘플 수 다양 (1시간 간격 기록)
+# ── 9개 센서 피처 (DB 스키마 일치) ──
+# 학습/운영 모두 동일한 9개 피처 사용
+FEATURE_COLUMNS_9 = [
+    "vibration_rms",     # 진동 RMS (g)
+    "temperature",       # 기기 온도 (°C)
+    "temp_residual",     # 온도 잔차 = 기기온도 - ExpectedTemp
+    "motor_current",     # 모터 전류 (A) - 학습 시 더미
+    "operating_hours",   # 누적 가동 시간 (h)
+    "ambient_temp",      # 외기 온도 (°C) - 기상청 API
+    "wind_speed",        # 풍속 (m/s) - 기상청 API
+    "humidity",          # 습도 (%) - 기상청 API
+    "season",            # 계절 (0=봄, 1=여름, 2=가을, 3=겨울)
+]
+
+# 환경 보정 공식 파라미터
+# ExpectedTemp = ambient_temp + AVG_HEAT_GENERATION
+# temp_residual = temperature - ExpectedTemp
+AVG_HEAT_GENERATION = 35.0  # 장비 평균 발열값 (°C) - 학습 데이터에서 산출 후 갱신
+
+# ── 샘플링 레이트 (전처리에서 RMS 계산 시 사용) ──
 KAIST_SAMPLING_RATE = 25600
+FEMTO_SAMPLING_RATE = 25600
+XJTU_SAMPLING_RATE = 25600
 
 # ── RUL 위험도 임계값 (일 기준) ──
-# FEMTO 논문 기준: vibration_rms > 20g = 고장 시점 (RUL 0)
 FAILURE_THRESHOLD_RMS = 20.0  # g 단위
 
 RUL_THRESHOLDS = {
@@ -46,7 +74,6 @@ RUL_THRESHOLDS = {
 }
 
 # ── XJTU-SY 고장모드 라벨 ──
-# 논문(Introduction PDF) 기반 고장모드 매핑
 XJTU_FAILURE_MODES = {
     "35Hz12kN": {
         "Bearing1_1": "outer_race",
@@ -71,12 +98,11 @@ XJTU_FAILURE_MODES = {
     },
 }
 
-# PTZ 카메라 고장모드로 매핑 (프로젝트 도메인 적용)
-# 베어링 고장모드 → PTZ 카메라 고장모드 매핑
+# PTZ 카메라 고장모드로 매핑
 FAILURE_MODE_MAPPING = {
-    "outer_race": "bearing_wear",          # 베어링 마모
-    "inner_race": "motor_overheat",        # 모터 과열
-    "cage": "bearing_wear",                # 베어링 마모 (케이지)
+    "outer_race": "bearing_wear",
+    "inner_race": "motor_overheat",
+    "cage": "bearing_wear",
     "outer_race_inner_race": "bearing_wear",
     "inner_race_outer_race_cage": "motor_overheat",
 }
@@ -110,3 +136,6 @@ RANDOM_FOREST_PARAMS = {
     "random_state": 42,
     "n_jobs": -1,
 }
+
+# ── 기상청 API 관측소 ──
+WEATHER_STN_ID = "112"  # 인천 (강화도 인근)

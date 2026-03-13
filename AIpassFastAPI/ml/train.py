@@ -26,24 +26,9 @@ def main():
                         help="RUL 예측 모델만 학습")
     parser.add_argument("--cls-only", action="store_true",
                         help="고장모드 분류 모델만 학습")
-    parser.add_argument("--quick", action="store_true",
-                        help="빠른 테스트 (데이터 일부만 사용)")
     parser.add_argument("--use-rf", action="store_true",
                         help="고장모드 분류에 RandomForest 사용 (기본: XGBoost)")
-    parser.add_argument("--max-kaist", type=int, default=None,
-                        help="KAIST 데이터 최대 파일 수")
-    parser.add_argument("--max-femto", type=int, default=None,
-                        help="FEMTO 베어링당 최대 파일 수")
-    parser.add_argument("--max-xjtu", type=int, default=None,
-                        help="XJTU-SY 베어링당 최대 파일 수")
     args = parser.parse_args()
-
-    # 빠른 테스트 모드
-    if args.quick:
-        args.max_kaist = args.max_kaist or 30
-        args.max_femto = args.max_femto or 100
-        args.max_xjtu = args.max_xjtu or 50
-        print("[Quick] 모드: 데이터 일부만 사용하여 빠른 검증")
 
     print("\n" + "█" * 60)
     print("  AI-Pass 예지보전 모델 학습 파이프라인")
@@ -60,10 +45,7 @@ def main():
         print("─" * 60)
         start = time.time()
         try:
-            rul_result = train_rul_model(
-                max_kaist=args.max_kaist,
-                max_femto_per_bearing=args.max_femto,
-            )
+            rul_result = train_rul_model()
             results["rul"] = rul_result
             elapsed = time.time() - start
             print(f"\nRUL 모델 학습 완료 ({elapsed:.1f}초)")
@@ -81,7 +63,6 @@ def main():
         start = time.time()
         try:
             fm_result = train_failure_mode_model(
-                max_files_per_bearing=args.max_xjtu,
                 use_xgboost=not args.use_rf,
             )
             results["failure_mode"] = fm_result
@@ -131,7 +112,7 @@ def _save_report(results: dict, total_elapsed: float):
     """학습 결과를 txt 파일로 저장"""
     now = datetime.now()
     timestamp = now.strftime("%Y%m%d_%H%M%S")
-    report_path = config.MODEL_DIR / f"training_report_{timestamp}.txt"
+    report_path = config.TRAINING_DIR / f"training_report_{timestamp}.txt"
 
     lines = []
     lines.append("=" * 60)

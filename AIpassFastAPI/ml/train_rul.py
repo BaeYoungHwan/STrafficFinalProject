@@ -1,7 +1,7 @@
 """
 RUL(잔여수명) 예측 모델 학습 - XGBoost Regression
-- KAIST + FEMTO 데이터셋 통합 학습
-- 환경 보정 피처 포함
+- 9개 센서 피처 기반 (DB 스키마 일치)
+- KAIST 데이터셋 단독 학습 (전처리 CSV 기반)
 """
 import joblib
 import numpy as np
@@ -14,17 +14,11 @@ from sklearn.metrics import (
 from xgboost import XGBRegressor
 
 from . import config
-from .data_loader import load_rul_dataset, get_feature_columns
 
 
-def train_rul_model(max_kaist: int = None,
-                    max_femto_per_bearing: int = None) -> dict:
+def train_rul_model() -> dict:
     """
-    RUL 예측 모델 학습
-
-    Args:
-        max_kaist: KAIST 최대 파일 수 (None=전체)
-        max_femto_per_bearing: FEMTO 베어링당 최대 파일 수
+    RUL 예측 모델 학습 (전처리된 9피처 CSV 기반)
 
     Returns:
         dict: 학습 결과 (metrics, model, scaler)
@@ -34,13 +28,18 @@ def train_rul_model(max_kaist: int = None,
     print("RUL 예측 모델 (XGBoost Regression) 학습 시작")
     print("=" * 60)
 
-    df = load_rul_dataset(
-        max_kaist=max_kaist,
-        max_femto_per_bearing=max_femto_per_bearing,
-    )
+    if config.RUL_CSV_V2_PATH.exists():
+        print(f"\n9피처 전처리 CSV 로딩: {config.RUL_CSV_V2_PATH}")
+        df = pd.read_csv(config.RUL_CSV_V2_PATH)
+        print(f"  {len(df)}개 샘플 로딩 완료 (9피처)")
+    else:
+        raise FileNotFoundError(
+            f"전처리 CSV가 없습니다: {config.RUL_CSV_V2_PATH}\n"
+            f"  → python -m ml.preprocess_9feat 먼저 실행하세요."
+        )
 
     # ── 2. 피처/타겟 분리 ──
-    feature_cols = get_feature_columns(df)
+    feature_cols = [c for c in config.FEATURE_COLUMNS_9 if c in df.columns]
     X = df[feature_cols].copy()
     y = df["rul_days"].copy()
 
@@ -119,15 +118,13 @@ def train_rul_model(max_kaist: int = None,
     feat_importance = sorted(
         zip(feature_cols, importance), key=lambda x: x[1], reverse=True
     )
-    print("\n상위 10 피처 중요도:")
-    for name, imp in feat_importance[:10]:
-        print(f"  {name:30s} : {imp:.4f}")
+    print("\n피처 중요도:")
+    for name, imp in feat_importance:
+        print(f"  {name:20s} : {imp:.4f}")
 
     # ── 9. 모델 저장 ──
     model.save_model(str(config.RUL_MODEL_PATH))
     joblib.dump(scaler, config.SCALER_RUL_PATH)
-
-    # 피처 컬럼 순서 저장 (추론 시 필요)
     joblib.dump(feature_cols, config.MODEL_DIR / "rul_feature_cols.pkl")
 
     print(f"\n모델 저장 완료:")
@@ -160,7 +157,7 @@ def predict_rul(features: dict, model=None, scaler=None,
     단일 샘플에 대한 RUL 예측 (추론용)
 
     Args:
-        features: extract_features()로 추출된 피처 딕셔너리
+        features: 9개 센서 피처 딕셔너리
         model: 학습된 XGBRegressor (None이면 파일에서 로딩)
         scaler: StandardScaler (None이면 파일에서 로딩)
         feature_cols: 피처 컬럼 리스트
