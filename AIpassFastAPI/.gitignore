@@ -5,3 +5,4 @@ __pycache__/
 *.onnx
 *.mp4
 captured_images/
+data/carnumber
