@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from multiprocessing import Process, Queue, shared_memory, Lock, Event
 from ultralytics import YOLO
 from core.config import settings
-
+from services.webhook_client import webhook_client
 from services.ocr_storage import process_violation_task
 from utils.http_client import http_client
 
@@ -188,6 +188,8 @@ class VisionEngine:
     async def process_event_loop(self):
         """[Process C] 가벼운 API 통신 및 이벤트 처리 루프"""
         from services.aggregator import congestion_engine 
+        # 🚨 [신규 추가] Webhook 클라이언트 임포트
+        from services.webhook_client import webhook_client
         
         while not self.stop_event.is_set():
             try:
@@ -214,10 +216,17 @@ class VisionEngine:
                 elif event["type"] == "EXIT_ROI":
                     await congestion_engine.record_exit(event["track_id"])
                     
-                elif event["type"] == "VIOLATION":
-                    asyncio.create_task(process_violation_task(
-                        event["crop"], event["violation_type"], event["confidence"]
-                    ))
+                # 🚨 [V3.1 개편] Headless AI의 Mock LPR JSON 웹훅 전송 로직 추가
+                elif event["type"] == "WEBHOOK_VIOLATION":
+                    payload = event["payload"]
+                    # Process B가 만들어준 완제품 JSON을 비동기로 쏘기만 합니다.
+                    asyncio.create_task(webhook_client.send_violation(payload))
+                    
+                # 🗑️ [삭제/주석] 기존 무거운 이미지 크롭 및 OCR 처리 로직은 폐기 (Headless 전환)
+                # elif event["type"] == "VIOLATION":
+                #     asyncio.create_task(process_violation_task(
+                #         event["crop"], event["violation_type"], event["confidence"]
+                #     ))
                     
             except queue.Empty:
                 await asyncio.sleep(0.01)
@@ -228,4 +237,4 @@ class VisionEngine:
         if self.ai_process: self.ai_process.join(3)
 
 # 글로벌 인스턴스
-vision_engine = VisionEngine(rtsp_url="rtsp://localhost:8554/mystream")
+vision_engine = VisionEngine(rtsp_url="rtsp://localhost:8554/korea_intersection_01")
