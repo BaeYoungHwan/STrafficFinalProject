@@ -1,2 +1,19 @@
 /.metadata/
 /산출물 예시
+
+# --- [AI-Pass Monorepo 통합 무시 파일] ---
+# 1. AI Engine (Python)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 2. Backend (Spring Boot / Java)
+/backend/build/
+/backend/target/
+/backend/bin/
+.gradle/
+
+# 3. Frontend (Vue.js / Node)
+/frontend/node_modules/
+/frontend/dist/
