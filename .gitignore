@@ -18,3 +18,5 @@ venv/
 /frontend/node_modules/
 /frontend/dist/
 /CLAUDE.md
+
+.claude/
