@@ -17,3 +17,4 @@ venv/
 # 3. Frontend (Vue.js / Node)
 /frontend/node_modules/
 /frontend/dist/
+/CLAUDE.md
