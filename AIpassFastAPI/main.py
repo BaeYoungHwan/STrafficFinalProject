@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware # 🚨 [추가] CORS 미들웨어 임포트
+from fastapi.staticfiles import StaticFiles
 import numpy as np
 import cv2
 
@@ -121,6 +122,7 @@ app.add_middleware(
 
 # API 라우터 등록
 app.include_router(stream.router, prefix="/api/v1")
+app.mount("/demo", StaticFiles(directory="static", html=True), name="demo")
 
 # ------------------------------------------
 # Endpoints
