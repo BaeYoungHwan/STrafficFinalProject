@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     VERSION: str = "1.0.0"
     
     # Backend Comm & Queue Settings
-    BACKEND_URL: str = "http://localhost:8080" # 백엔드 서버 주소
+    BACKEND_URL: str = "http://localhost:9000"  # Spring Boot 실제 포트
     QUEUE_MAXSIZE: int = 1000  # OOM 방지용 메모리 큐 최대 크기
     
     # Streaming Settings
@@ -27,8 +27,10 @@ class Settings(BaseSettings):
     TARGET_CLASSES: list = [2, 3, 5, 7] # 승용차, 이륜차, 버스, 화물차
     CAMERA_ID: str = "CAM_INTERSECTION_MAIN"
     
-    # ... (기존 설정 유지) ...
-    
+    # [V2 추가] 동영상 소스 URL (.env의 VIDEO_SOURCE_URL로 덮어쓰기 가능)
+    # 지원 형식: 로컬 파일 (C:/path/video.mp4), RTSP (rtsp://...), HTTP (http://...)
+    VIDEO_SOURCE_URL: str = "rtsp://localhost:8554/korea_intersection_01"
+
     # [Flow C] Emergency Classes
     EMERGENCY_CLASSES: list = [9, 10]  # 구급차, 소방차 등 (커스텀 모델 기준)
     

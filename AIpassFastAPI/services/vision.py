@@ -75,6 +75,12 @@ def ai_inference_worker(meta_queue: Queue, event_queue: Queue, mjpeg_queue: Queu
     logger.info(f"[AI Engine] Process started. Loading {settings.YOLO_MODEL}...")
     model = YOLO(settings.YOLO_MODEL)
     active_tracks = set()
+
+    from services.speed_detector import (
+        process_headless_inference,
+        vehicle_history,
+        SPEED_LIMIT_KMH,
+    )
     
     def safe_put(event_data):
         try:
@@ -96,20 +102,20 @@ def ai_inference_worker(meta_queue: Queue, event_queue: Queue, mjpeg_queue: Queu
             existing_shm.close()
 
         all_classes = settings.TARGET_CLASSES + settings.EMERGENCY_CLASSES
-        results = model.track(frame, persist=True, tracker="bytetrack.yaml", verbose=False, 
+        results = model.track(frame, persist=True, tracker="bytetrack.yaml", verbose=False,
                               imgsz=settings.INFERENCE_IMGSZ, conf=settings.CONF_THRESHOLD, classes=all_classes)
-        
+
         if results[0].boxes and results[0].boxes.id is not None:
             id_list = results[0].boxes.id.int().cpu().tolist()
             current_tracks = set(id_list)
-            
+
             for i, track_id in enumerate(id_list):
                 box = results[0].boxes[i]
                 class_id = int(box.cls[0])
                 class_name = model.names[class_id]
                 conf = float(box.conf[0])
                 x_center, y_center, width, height = box.xywh[0].tolist()
-                
+
                 # Flow C (긴급 차량)
                 if class_id in settings.EMERGENCY_CLASSES and track_id not in active_tracks:
                     safe_put({"type": "EMERGENCY", "track_id": track_id, "class": class_name, "conf": conf})
@@ -119,20 +125,20 @@ def ai_inference_worker(meta_queue: Queue, event_queue: Queue, mjpeg_queue: Queu
                 is_inside_roi = cv2.pointPolygonTest(INTERSECTION_ROI, (x_center, y_center), False) >= 0
                 if is_inside_roi and track_id not in active_tracks:
                     safe_put({"type": "ENTER_ROI", "track_id": track_id})
-                
+
                 # Flow B (단속선 통과 및 크롭)
                 if y_center > VIOLATION_LINE_Y and track_id not in active_tracks:
                     x1 = max(0, int(x_center - width/2))
-                    y1 = max(0, int(y_center)) 
+                    y1 = max(0, int(y_center))
                     x2 = min(frame.shape[1], int(x_center + width/2))
                     y2 = min(frame.shape[0], int(y_center + height/2))
-                    
+
                     plate_crop = frame[y1:y2, x1:x2]
                     if plate_crop.size > 0:
                         safe_put({
-                            "type": "VIOLATION", 
-                            "track_id": track_id, 
-                            "crop": plate_crop, 
+                            "type": "VIOLATION",
+                            "track_id": track_id,
+                            "crop": plate_crop,
                             "violation_type": "line_crossing",
                             "confidence": conf
                         })
@@ -145,11 +151,36 @@ def ai_inference_worker(meta_queue: Queue, event_queue: Queue, mjpeg_queue: Queu
             for t_id in active_tracks:
                 safe_put({"type": "EXIT_ROI", "track_id": t_id})
             active_tracks.clear()
-            
+
+        # [과속 감지] Process B에서 speed_detector 호출
+        process_headless_inference(results, event_queue)
+
         # [Web Demo] 3단계 경량화 시각화 렌더링
         annotated_frame = results[0].plot()
         resized_frame = cv2.resize(annotated_frame, (640, 480))
-        cv2.line(resized_frame, (0, int(VIOLATION_LINE_Y * 480/frame.shape[0])), 
+
+        # [과속 오버레이] 각 차량 bbox 위에 속도 텍스트 표시
+        if results[0].boxes and results[0].boxes.id is not None:
+            id_list = results[0].boxes.id.int().cpu().tolist()
+            scale_x = 640 / frame.shape[1]
+            scale_y = 480 / frame.shape[0]
+            for i, track_id in enumerate(id_list):
+                data = vehicle_history.get(track_id)
+                if data is None:
+                    continue
+                speed = data.get("ema_speed", 0.0)
+                if speed <= 0:
+                    continue
+                box = results[0].boxes[i]
+                x_center, y_center, width, _ = box.xywh[0].tolist()
+                x_px = int((x_center - width / 2) * scale_x)
+                y_px = max(0, int(y_center * scale_y) - 10)
+                color = (0, 0, 255) if speed > SPEED_LIMIT_KMH else (0, 220, 0)
+                label = f"{speed:.0f} km/h"
+                cv2.putText(resized_frame, label, (x_px, y_px),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
+
+        cv2.line(resized_frame, (0, int(VIOLATION_LINE_Y * 480/frame.shape[0])),
                  (640, int(VIOLATION_LINE_Y * 480/frame.shape[0])), (0, 0, 255), 2)
         
         ret, buffer = cv2.imencode('.jpg', resized_frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
@@ -236,5 +267,19 @@ class VisionEngine:
         if self.reader_process: self.reader_process.join(3)
         if self.ai_process: self.ai_process.join(3)
 
-# 글로벌 인스턴스
-vision_engine = VisionEngine(rtsp_url="rtsp://localhost:8554/korea_intersection_01")
+    def restart(self, new_url: str):
+        """동영상 소스 URL을 변경하고 프로세스를 재시작한다."""
+        logger.info(f"[Vision] Restarting engine with new source: {new_url}")
+        self.stop()
+        self.rtsp_url = new_url
+        # 큐 초기화
+        while not self.meta_queue.empty():
+            try: self.meta_queue.get_nowait()
+            except: break
+        while not self.mjpeg_queue.empty():
+            try: self.mjpeg_queue.get_nowait()
+            except: break
+        self.start()
+
+# 글로벌 인스턴스 — VIDEO_SOURCE_URL은 .env 또는 config 기본값에서 읽음
+vision_engine = VisionEngine(rtsp_url=settings.VIDEO_SOURCE_URL)

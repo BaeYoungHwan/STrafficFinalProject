@@ -26,6 +26,13 @@ class WebhookClient:
 
     async def send_violation(self, payload: dict) -> bool:
         """비동기 발송 루틴 (메인 루프 논블로킹 보장)"""
+        # 위반 발생 즉시 스트리밍 API 캐시에도 저장
+        try:
+            from api.stream import push_violation
+            push_violation(payload)
+        except Exception:
+            pass
+
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.post(self.target_url, json=payload, timeout=self.timeout)
