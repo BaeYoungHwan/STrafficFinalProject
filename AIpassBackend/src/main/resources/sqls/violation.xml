@@ -12,57 +12,59 @@
             <if test="violationType != null and violationType != ''">
                 AND violation_type = #{violationType}
             </if>
-            <if test="status != null and status != ''">
-                AND status = #{status}
+            <if test="fineStatus != null and fineStatus != ''">
+                AND fine_status = #{fineStatus}
             </if>
         </where>
     </sql>
 
     <select id="findAll" parameterType="map" resultType="com.aipass.dto.ViolationDTO">
         SELECT
-            id,
+            violation_id,
+            intersection_id,
             event_id,
             plate_number,
             violation_type,
-            location,
+            image_url,
+            fine_status,
+            is_corrected,
             speed_kmh,
-            status,
-            plate_image_base64,
-            TO_CHAR(registered_at AT TIME ZONE 'Asia/Seoul', 'YY-MM-DD HH24:MI:SS') AS registered_at
-        FROM violations
+            TO_CHAR(detected_at AT TIME ZONE 'Asia/Seoul', 'YY-MM-DD HH24:MI:SS') AS detected_at
+        FROM violation_log
         <include refid="whereClause"/>
-        ORDER BY registered_at DESC
+        ORDER BY detected_at DESC
         LIMIT #{size} OFFSET #{offset}
     </select>
 
     <select id="countAll" parameterType="map" resultType="int">
-        SELECT COUNT(*) FROM violations
+        SELECT COUNT(*) FROM violation_log
         <include refid="whereClause"/>
     </select>
 
     <select id="findById" parameterType="long" resultType="com.aipass.dto.ViolationDTO">
         SELECT
-            id,
+            violation_id,
+            intersection_id,
             event_id,
             plate_number,
             violation_type,
-            location,
+            image_url,
+            fine_status,
+            is_corrected,
             speed_kmh,
-            status,
-            plate_image_base64,
-            TO_CHAR(registered_at AT TIME ZONE 'Asia/Seoul', 'YY-MM-DD HH24:MI:SS') AS registered_at
-        FROM violations
-        WHERE id = #{id}
+            TO_CHAR(detected_at AT TIME ZONE 'Asia/Seoul', 'YY-MM-DD HH24:MI:SS') AS detected_at
+        FROM violation_log
+        WHERE violation_id = #{id}
     </select>
 
     <insert id="insert" parameterType="com.aipass.dto.ViolationDTO">
-        INSERT INTO violations (event_id, plate_number, violation_type, location, speed_kmh, status, plate_image_base64)
-        VALUES (#{eventId}, #{plateNumber}, #{violationType}, #{location}, #{speedKmh}, '대기중', #{plateImageBase64})
+        INSERT INTO violation_log (event_id, intersection_id, plate_number, violation_type, image_url, speed_kmh, fine_status)
+        VALUES (#{eventId}, #{intersectionId}, #{plateNumber}, #{violationType}, #{imageUrl}, #{speedKmh}, 'UNPROCESSED')
         ON CONFLICT (event_id) DO NOTHING
     </insert>
 
     <update id="updateStatus">
-        UPDATE violations SET status = #{status} WHERE id = #{id}
+        UPDATE violation_log SET fine_status = #{fineStatus} WHERE violation_id = #{id}
     </update>
 
 </mapper>

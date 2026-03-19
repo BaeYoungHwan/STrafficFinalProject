@@ -1,20 +1,31 @@
 package com.aipass.dto;
 
 public class ViolationDTO {
-    private Long id;
+    private Long violationId;
+    private Long intersectionId;
     private String eventId;
     private String plateNumber;
     private String violationType;
-    private String location;
+    private String imageUrl;
+    private String fineStatus;   // DB: UNPROCESSED / APPROVED / REJECTED
+    private Boolean isCorrected;
     private Double speedKmh;
-    private String status;
-    private String plateImageBase64;
-    private String registeredAt;
+    private String detectedAt;
+
+    // fine_status를 한국어로 변환해서 반환
+    public String getStatus() {
+        if ("APPROVED".equals(fineStatus)) return "승인";
+        if ("REJECTED".equals(fineStatus)) return "반려";
+        return "대기중";
+    }
 
     public ViolationDTO() {}
 
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
+    public Long getViolationId() { return violationId; }
+    public void setViolationId(Long violationId) { this.violationId = violationId; }
+
+    public Long getIntersectionId() { return intersectionId; }
+    public void setIntersectionId(Long intersectionId) { this.intersectionId = intersectionId; }
 
     public String getEventId() { return eventId; }
     public void setEventId(String eventId) { this.eventId = eventId; }
@@ -25,18 +36,18 @@ public class ViolationDTO {
     public String getViolationType() { return violationType; }
     public void setViolationType(String violationType) { this.violationType = violationType; }
 
-    public String getLocation() { return location; }
-    public void setLocation(String location) { this.location = location; }
+    public String getImageUrl() { return imageUrl; }
+    public void setImageUrl(String imageUrl) { this.imageUrl = imageUrl; }
+
+    public String getFineStatus() { return fineStatus; }
+    public void setFineStatus(String fineStatus) { this.fineStatus = fineStatus; }
+
+    public Boolean getIsCorrected() { return isCorrected; }
+    public void setIsCorrected(Boolean isCorrected) { this.isCorrected = isCorrected; }
 
     public Double getSpeedKmh() { return speedKmh; }
     public void setSpeedKmh(Double speedKmh) { this.speedKmh = speedKmh; }
 
-    public String getStatus() { return status; }
-    public void setStatus(String status) { this.status = status; }
-
-    public String getPlateImageBase64() { return plateImageBase64; }
-    public void setPlateImageBase64(String plateImageBase64) { this.plateImageBase64 = plateImageBase64; }
-
-    public String getRegisteredAt() { return registeredAt; }
-    public void setRegisteredAt(String registeredAt) { this.registeredAt = registeredAt; }
+    public String getDetectedAt() { return detectedAt; }
+    public void setDetectedAt(String detectedAt) { this.detectedAt = detectedAt; }
 }

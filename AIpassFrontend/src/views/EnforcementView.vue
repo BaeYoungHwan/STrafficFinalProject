@@ -64,8 +64,8 @@
               </tr>
               <tr
                 v-for="(item, index) in items"
-                :key="item.id"
-                :class="{ selected: selectedItem && selectedItem.id === item.id }"
+                :key="item.violationId"
+                :class="{ selected: selectedItem && selectedItem.violationId === item.violationId }"
                 @click="selectItem(item)"
               >
                 <td>{{ (page - 1) * size + index + 1 }}</td>
@@ -73,7 +73,7 @@
                 <td>{{ item.violationType }}</td>
                 <td class="location-cell">{{ item.location }}</td>
                 <td>
-                  <span class="badge" :class="statusClass(item.status)">{{ item.status }}</span>
+                  <span class="badge" :class="statusClass(item)">{{ statusLabel(item) }}</span>
                 </td>
               </tr>
             </tbody>
@@ -103,8 +103,8 @@
         <!-- 차량 이미지 -->
         <div class="image-wrap">
           <img
-            v-if="selectedItem.plateImageBase64"
-            :src="'data:image/jpeg;base64,' + selectedItem.plateImageBase64"
+            v-if="selectedItem.imageUrl"
+            :src="selectedItem.imageUrl"
             alt="차량 이미지"
           />
           <div v-else class="no-image">이미지 없음</div>
@@ -114,7 +114,7 @@
         <table class="detail-table">
           <tr>
             <th>번호</th>
-            <td>{{ selectedItem.id }}</td>
+            <td>{{ selectedItem.violationId }}</td>
           </tr>
           <tr>
             <th>차량번호</th>
@@ -135,17 +135,17 @@
           <tr>
             <th>상태</th>
             <td>
-              <span class="badge" :class="statusClass(selectedItem.status)">{{ selectedItem.status }}</span>
+              <span class="badge" :class="statusClass(selectedItem)">{{ statusLabel(selectedItem) }}</span>
             </td>
           </tr>
           <tr>
             <th>등록시간</th>
-            <td>{{ selectedItem.registeredAt }}</td>
+            <td>{{ selectedItem.detectedAt }}</td>
           </tr>
         </table>
 
         <!-- 액션 버튼 -->
-        <div class="detail-actions" v-if="selectedItem.status === '대기중'">
+        <div class="detail-actions" v-if="selectedItem.fineStatus === 'UNPROCESSED' || !selectedItem.fineStatus">
           <button class="btn-approve" :disabled="submitting" @click="updateStatus('승인')">
             {{ submitting ? '처리 중...' : '승인' }}
           </button>
@@ -154,7 +154,7 @@
           </button>
         </div>
         <div class="detail-actions" v-else>
-          <p class="status-done">처리 완료 ({{ selectedItem.status }})</p>
+          <p class="status-done">처리 완료 ({{ statusLabel(selectedItem) }})</p>
         </div>
       </div>
     </div>
@@ -189,10 +189,18 @@ const pageNumbers = computed(() => {
   return pages
 })
 
-const statusClass = (status) => {
-  if (status === '승인') return 'badge-green'
-  if (status === '반려') return 'badge-red'
+const statusClass = (item) => {
+  const s = item.fineStatus || item.status
+  if (s === 'APPROVED' || s === '승인') return 'badge-green'
+  if (s === 'REJECTED' || s === '반려') return 'badge-red'
   return 'badge-yellow'
+}
+
+const statusLabel = (item) => {
+  const s = item.fineStatus || ''
+  if (s === 'APPROVED') return '승인'
+  if (s === 'REJECTED') return '반려'
+  return '대기중'
 }
 
 const fetchList = async () => {
@@ -242,10 +250,11 @@ const selectItem = (item) => {
 const updateStatus = async (newStatus) => {
   submitting.value = true
   try {
-    await api.put(`/enforcement/violations/${selectedItem.value.id}/status`, { status: newStatus })
+    await api.put(`/enforcement/violations/${selectedItem.value.violationId}/status`, { status: newStatus })
     selectedItem.value.status = newStatus
-    const idx = items.value.findIndex(i => i.id === selectedItem.value.id)
-    if (idx !== -1) items.value[idx].status = newStatus
+    selectedItem.value.fineStatus = newStatus === '승인' ? 'APPROVED' : 'REJECTED'
+    const idx = items.value.findIndex(i => i.violationId === selectedItem.value.violationId)
+    if (idx !== -1) items.value[idx].fineStatus = selectedItem.value.fineStatus
   } catch (e) {
     alert('상태 변경에 실패했습니다.')
   } finally {
