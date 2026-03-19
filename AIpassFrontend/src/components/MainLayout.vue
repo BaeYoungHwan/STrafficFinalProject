@@ -2,9 +2,13 @@
   <div class="main-layout">
     <Header />
     <Sidebar />
-    <main class="main-content">
-      <router-view />
-    </main>
+    <div class="content-area">
+      <aside class="side-panel left-panel"></aside>
+      <main class="main-content">
+        <router-view />
+      </main>
+      <aside class="side-panel right-panel"></aside>
+    </div>
     <Footer />
   </div>
 </template>
@@ -20,6 +24,21 @@ import Footer from './Footer.vue'
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  max-width: 1280px;
+  margin: 0 auto;
+  background: #FFFFFF;
+}
+
+.content-area {
+  flex: 1;
+  display: flex;
+  background: #F4F6FA;
+}
+
+.side-panel {
+  width: 120px;
+  min-width: 120px;
+  background: #FFFFFF;
 }
 
 .main-content {

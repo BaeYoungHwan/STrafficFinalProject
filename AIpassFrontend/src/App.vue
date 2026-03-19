@@ -21,7 +21,7 @@ body,
 
 body {
   min-width: 320px;
-  background: #F4F6FA;
+  background: #FFFFFF;
   font-family: 'Pretendard', 'Noto Sans KR', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   color: #1A1A2E;
   -webkit-font-smoothing: antialiased;
