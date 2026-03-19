@@ -20,13 +20,21 @@ VIOLATION_LINE_Y = 600
 
 def video_reader_worker(rtsp_url: str, meta_queue: Queue, lock: Lock, stop_event: Event):
     """[Process A] 영상 수집 워커 (SharedMemory 사용)"""
+    from core.config import settings as _settings
+    _frame_interval = 1.0 / _settings.STREAM_FPS_LIMIT  # 10 FPS 제한
+
     cap = None
     shm = None
     try:
-        cap = cv2.VideoCapture(rtsp_url)
-        if not cap.isOpened():
-            logger.error(f"[Vision] Failed to open stream: {rtsp_url}")
-            return
+        # 초기 연결 실패 시 재시도 루프
+        while not stop_event.is_set():
+            cap = cv2.VideoCapture(rtsp_url)
+            if cap.isOpened():
+                break
+            logger.warning(f"[Vision] Cannot open stream, retrying in 3s: {rtsp_url}")
+            time.sleep(3)
+        else:
+            return  # stop_event 설정된 경우 정상 종료
 
         ret, frame = cap.read()
         if not ret: return
@@ -36,22 +44,24 @@ def video_reader_worker(rtsp_url: str, meta_queue: Queue, lock: Lock, stop_event
         shm_name = shm.name
         
         while not stop_event.is_set():
+            _t0 = time.time()
+
             ret, frame = cap.read()
             if not ret:
-                if cap: cap.release() 
+                if cap: cap.release()
                 time.sleep(2)
                 cap = cv2.VideoCapture(rtsp_url)
                 continue
-            
+
             if frame.nbytes != shm_size:
                 logger.error("[Vision] Resolution changed! Exiting worker.")
-                break 
-                
+                break
+
             shared_array = np.ndarray(frame.shape, dtype=frame.dtype, buffer=shm.buf)
-            
+
             with lock:
                 np.copyto(shared_array, frame)
-            
+
             meta = {'shm_name': shm_name, 'shape': frame.shape, 'dtype': frame.dtype}
             try:
                 meta_queue.put_nowait(meta)
@@ -61,6 +71,11 @@ def video_reader_worker(rtsp_url: str, meta_queue: Queue, lock: Lock, stop_event
                     meta_queue.put_nowait(meta)
                 except queue.Empty:
                     pass
+
+            # FPS 제한: STREAM_FPS_LIMIT(10)에 맞춰 슬립
+            elapsed = time.time() - _t0
+            if elapsed < _frame_interval:
+                time.sleep(_frame_interval - elapsed)
                     
     except Exception as e:
         logger.error(f"[Vision] Worker error: {e}")
@@ -156,7 +171,7 @@ def ai_inference_worker(meta_queue: Queue, event_queue: Queue, mjpeg_queue: Queu
         process_headless_inference(results, event_queue)
 
         # [Web Demo] 3단계 경량화 시각화 렌더링
-        annotated_frame = results[0].plot()
+        annotated_frame = results[0].plot(labels=False)
         resized_frame = cv2.resize(annotated_frame, (640, 480))
 
         # [과속 오버레이] 각 차량 bbox 위에 속도 텍스트 표시
@@ -168,15 +183,23 @@ def ai_inference_worker(meta_queue: Queue, event_queue: Queue, mjpeg_queue: Queu
                 data = vehicle_history.get(track_id)
                 if data is None:
                     continue
-                speed = data.get("ema_speed", 0.0)
+                raw_speed = data.get("ema_speed", 0.0)
+                speed = raw_speed * settings.SPEED_SCALE_FACTOR
                 if speed <= 0:
                     continue
                 box = results[0].boxes[i]
                 x_center, y_center, width, _ = box.xywh[0].tolist()
                 x_px = int((x_center - width / 2) * scale_x)
                 y_px = max(0, int(y_center * scale_y) - 10)
-                color = (0, 0, 255) if speed > SPEED_LIMIT_KMH else (0, 220, 0)
-                label = f"{speed:.0f} km/h"
+                if speed >= 70:
+                    color = (0, 0, 255)     # 빨간색
+                elif speed >= 60:
+                    color = (0, 220, 0)     # 초록색
+                elif speed >= 50:
+                    color = (255, 255, 255) # 흰색
+                else:
+                    continue                # 50 미만 표시 안 함
+                label = f"ID:{track_id} {speed:.0f}km/h"
                 cv2.putText(resized_frame, label, (x_px, y_px),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
 

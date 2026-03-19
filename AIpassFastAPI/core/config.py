@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     # Streaming Settings
     STREAM_MAX_WIDTH: int = 640
     STREAM_MAX_HEIGHT: int = 480
-    STREAM_FPS_LIMIT: int = 10
+    STREAM_FPS_LIMIT: int = 25
     
     # OCR Concurrency
     OCR_MAX_CONCURRENT_TASKS: int = 3 # Semaphore 동시성 제한
@@ -22,10 +22,11 @@ class Settings(BaseSettings):
 
     # [V2 추가] Vision Engine Settings
     YOLO_MODEL: str = "yolo26n.pt"  # V2 요구사항 모델
-    INFERENCE_IMGSZ: int = 1280
-    CONF_THRESHOLD: float = 0.5
+    INFERENCE_IMGSZ: int = 640
+    CONF_THRESHOLD: float = 0.3
     TARGET_CLASSES: list = [2, 3, 5, 7] # 승용차, 이륜차, 버스, 화물차
     CAMERA_ID: str = "CAM_INTERSECTION_MAIN"
+    SPEED_SCALE_FACTOR: float = 1.4  # 호모그래피 스케일 보정 (.env에서 덮어쓰기 가능)
     
     # [V2 추가] 동영상 소스 URL (.env의 VIDEO_SOURCE_URL로 덮어쓰기 가능)
     # 지원 형식: 로컬 파일 (C:/path/video.mp4), RTSP (rtsp://...), HTTP (http://...)

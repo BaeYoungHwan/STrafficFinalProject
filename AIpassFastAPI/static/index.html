@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AIpass — 과속감지 데모</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      min-height: 100vh;
+      padding: 24px;
+    }
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 600;
+      margin-bottom: 20px;
+      color: #58a6ff;
+      letter-spacing: 0.02em;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+    .card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      padding: 20px;
+    }
+    .card h2 {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 14px;
+    }
+
+    /* MJPEG stream */
+    #stream-img {
+      width: 100%;
+      border-radius: 6px;
+      background: #010409;
+      display: block;
+      min-height: 240px;
+    }
+
+    /* Status badges */
+    .status-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .stat {
+      background: #0d1117;
+      border: 1px solid #21262d;
+      border-radius: 6px;
+      padding: 10px 14px;
+    }
+    .stat .label { font-size: 0.72rem; color: #8b949e; margin-bottom: 4px; }
+    .stat .value { font-size: 1.05rem; font-weight: 600; color: #e6edf3; }
+
+    /* Violations table */
+    .violations-wrap { max-height: 320px; overflow-y: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    th {
+      position: sticky; top: 0;
+      background: #21262d;
+      color: #8b949e;
+      font-weight: 600;
+      text-align: left;
+      padding: 8px 10px;
+    }
+    td { padding: 8px 10px; border-bottom: 1px solid #21262d; vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    .speed-badge {
+      display: inline-block;
+      background: #3d1a1a;
+      color: #ff7b72;
+      border: 1px solid #6e2020;
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-weight: 700;
+    }
+    .plate { font-family: monospace; color: #ffa657; }
+    .ts { color: #8b949e; font-size: 0.78rem; }
+    .eid { font-family: monospace; font-size: 0.72rem; color: #6e7681; }
+    .empty-row td { text-align: center; color: #484f58; padding: 24px 0; }
+
+    /* Source change form */
+    .form-row { display: flex; gap: 8px; margin-top: 6px; }
+    input[type="text"] {
+      flex: 1;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #e6edf3;
+      padding: 8px 12px;
+      font-size: 0.85rem;
+      outline: none;
+    }
+    input[type="text"]:focus { border-color: #58a6ff; }
+    button {
+      background: #238636;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 16px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    button:hover { background: #2ea043; }
+    #source-msg {
+      margin-top: 8px;
+      font-size: 0.8rem;
+      min-height: 18px;
+      color: #3fb950;
+    }
+    #source-msg.err { color: #ff7b72; }
+  </style>
+</head>
+<body>
+  <h1>AIpass — 과속감지 데모</h1>
+
+  <div class="grid">
+    <!-- Left column -->
+    <div style="display:flex; flex-direction:column; gap:20px;">
+
+      <!-- MJPEG Stream -->
+      <div class="card">
+        <h2>실시간 CCTV 스트림</h2>
+        <img id="stream-img" src="/api/v1/stream/video" alt="MJPEG Stream">
+      </div>
+
+      <!-- CCTV URL 변경 -->
+      <div class="card">
+        <h2>CCTV 소스 변경</h2>
+        <label style="font-size:0.82rem; color:#8b949e;">RTSP / HTTP 스트림 URL</label>
+        <div class="form-row">
+          <input type="text" id="source-url" placeholder="rtsp://... 또는 http://...">
+          <button onclick="changeSource()">변경</button>
+        </div>
+        <div id="source-msg"></div>
+      </div>
+
+    </div>
+
+    <!-- Right column -->
+    <div style="display:flex; flex-direction:column; gap:20px;">
+
+      <!-- 엔진 상태 -->
+      <div class="card">
+        <h2>엔진 상태 <span id="status-age" style="font-size:0.72rem; color:#484f58; font-weight:400; text-transform:none;"></span></h2>
+        <div class="status-grid" id="status-grid">
+          <div class="stat"><div class="label">상태</div><div class="value" id="s-running">—</div></div>
+          <div class="stat"><div class="label">FPS</div><div class="value" id="s-fps">—</div></div>
+          <div class="stat"><div class="label">총 감지 차량</div><div class="value" id="s-total">—</div></div>
+          <div class="stat"><div class="label">과속 위반 수</div><div class="value" id="s-violations">—</div></div>
+          <div class="stat"><div class="label">소스 URL</div><div class="value" id="s-url" style="font-size:0.72rem; word-break:break-all;">—</div></div>
+          <div class="stat"><div class="label">임계 속도</div><div class="value" id="s-threshold">—</div></div>
+        </div>
+      </div>
+
+      <!-- 과속 위반 목록 -->
+      <div class="card" style="flex:1;">
+        <h2>과속 위반 목록 <span id="viol-age" style="font-size:0.72rem; color:#484f58; font-weight:400; text-transform:none;"></span></h2>
+        <div class="violations-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>시각</th>
+                <th>속도</th>
+                <th>번호판</th>
+                <th>이벤트 ID</th>
+              </tr>
+            </thead>
+            <tbody id="viol-tbody">
+              <tr class="empty-row"><td colspan="4">데이터 로딩 중…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    // ── 유틸 ───────────────────────────────────────────
+    function fmtTime(ts) {
+      if (!ts) return '—';
+      const s = String(ts);
+      return s.length >= 19 ? s.slice(11, 19) : s.length >= 11 ? s.slice(11) : s;
+    }
+
+    function setEl(id, val) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = val ?? '—';
+    }
+
+    // ── 엔진 상태 폴링 (5초) ──────────────────────────
+    async function fetchStatus() {
+      try {
+        const r = await fetch('/api/v1/stream/status');
+        if (!r.ok) throw new Error(r.status);
+        const d = await r.json();
+
+        setEl('s-running', d.is_running ? '✅ 가동 중' : '⛔ 중지');
+        setEl('s-fps', d.fps != null ? d.fps.toFixed(1) : '—');
+        setEl('s-total', d.total_detections ?? '—');
+        setEl('s-violations', d.violation_count ?? '—');
+        setEl('s-url', d.current_source ?? '—');
+        setEl('s-threshold', d.speed_threshold != null ? d.speed_threshold + ' km/h' : '—');
+        setEl('status-age', '방금 갱신');
+      } catch (e) {
+        setEl('status-age', '갱신 실패');
+      }
+    }
+
+    // ── 위반 목록 폴링 (3초) ──────────────────────────
+    async function fetchViolations() {
+      try {
+        const r = await fetch('/api/v1/stream/violations?limit=10');
+        if (!r.ok) throw new Error(r.status);
+        const list = await r.json();
+
+        const tbody = document.getElementById('viol-tbody');
+        if (!list || list.length === 0) {
+          tbody.innerHTML = '<tr class="empty-row"><td colspan="4">위반 내역 없음</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = list.map(v => {
+          const ts = fmtTime(v.timestamp);
+          const speed = v.speedKmh != null ? v.speedKmh.toFixed(1) : '—';
+          const plate = v.mockLprData?.plateNumber ?? '—';
+          const eid = v.eventId ? v.eventId.slice(0, 16) : '—';
+          return `<tr>
+            <td class="ts">${ts}</td>
+            <td><span class="speed-badge">${speed} km/h</span></td>
+            <td class="plate">${plate}</td>
+            <td class="eid">${eid}</td>
+          </tr>`;
+        }).join('');
+
+        setEl('viol-age', '방금 갱신');
+      } catch (e) {
+        setEl('viol-age', '갱신 실패');
+      }
+    }
+
+    // ── 소스 변경 ────────────────────────────────────
+    async function changeSource() {
+      const url = document.getElementById('source-url').value.trim();
+      const msg = document.getElementById('source-msg');
+      if (!url) { msg.className = 'err'; msg.textContent = 'URL을 입력하세요.'; return; }
+
+      msg.className = ''; msg.textContent = '변경 중…';
+      try {
+        const r = await fetch('/api/v1/stream/source', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url })
+        });
+        if (!r.ok) throw new Error(await r.text());
+        msg.className = ''; msg.textContent = '변경 완료 — 스트림 리로드 중…';
+        // MJPEG img 리로드 (캐시 방지)
+        const img = document.getElementById('stream-img');
+        img.src = '/api/v1/stream/video?t=' + Date.now();
+        setTimeout(() => { msg.textContent = ''; }, 3000);
+      } catch (e) {
+        msg.className = 'err'; msg.textContent = '변경 실패: ' + e.message;
+      }
+    }
+
+    // ── 초기 실행 + 인터벌 ────────────────────────────
+    fetchStatus();
+    fetchViolations();
+    setInterval(fetchStatus, 5000);
+    setInterval(fetchViolations, 3000);
+  </script>
+</body>
+</html>

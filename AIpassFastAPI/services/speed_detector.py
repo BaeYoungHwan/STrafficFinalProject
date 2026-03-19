@@ -6,6 +6,7 @@ import numpy as np
 from datetime import datetime, timezone
 from collections import deque
 import queue
+from core.config import settings as _cfg
 
 logger = logging.getLogger(__name__)
 
@@ -37,22 +38,22 @@ def update_and_get_speed(track_id: int, center_x: float, y_max: float, current_t
     history.append((current_time, (center_x, y_max)))
     vehicle_history[track_id]['last_seen'] = current_time
     
-    if len(history) < 5: return 0.0
-        
-    oldest_time, oldest_pt = history[0]
+    if len(history) < 5: return 0.0  # Warm-up: EMA 수렴 전 초기 노이즈 억제
+
+    prev_time, prev_pt = history[-2]
     latest_time, latest_pt = history[-1]
-    
-    time_diff = latest_time - oldest_time
+
+    time_diff = latest_time - prev_time
     if time_diff <= 0: return 0.0
-        
-    distance_m = get_real_world_distance(oldest_pt, latest_pt)
-    raw_speed_kmh = (distance_m / time_diff) * 3.6 
+
+    distance_m = get_real_world_distance(prev_pt, latest_pt)
+    raw_speed_kmh = (distance_m / time_diff) * 3.6
     
     prev_ema = vehicle_history[track_id]['ema_speed']
     smoothed_speed = raw_speed_kmh if prev_ema == 0.0 else (EMA_ALPHA * raw_speed_kmh) + ((1 - EMA_ALPHA) * prev_ema)
         
-    vehicle_history[track_id]['ema_speed'] = smoothed_speed
-    return round(smoothed_speed, 1)
+    vehicle_history[track_id]['ema_speed'] = smoothed_speed  # raw 저장 (scale 미적용)
+    return round(smoothed_speed * _cfg.SPEED_SCALE_FACTOR, 1)
 
 def garbage_collection(current_time: float):
     stale_ids = [t_id for t_id, data in vehicle_history.items() if current_time - data['last_seen'] > 2.0]
