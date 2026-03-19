@@ -348,7 +348,8 @@ const updateViolation = async () => {
     editSuccess.value = true
     setTimeout(() => { editSuccess.value = false }, 3000)
   } catch (e) {
-    alert('수정에 실패했습니다.')
+    console.error('[updateViolation] 실패:', e.response?.status, e.response?.data)
+    alert(`수정에 실패했습니다. (${e.response?.status ?? e.message ?? 'unknown'})`)
   } finally {
     submitting.value = false
   }

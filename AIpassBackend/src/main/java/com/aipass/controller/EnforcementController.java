@@ -2,6 +2,8 @@ package com.aipass.controller;
 
 import com.aipass.dao.ViolationMapper;
 import com.aipass.dto.ViolationDTO;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -12,6 +14,8 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/enforcement")
 public class EnforcementController {
+
+    private static final Logger logger = LoggerFactory.getLogger(EnforcementController.class);
 
     private final ViolationMapper violationMapper;
 
@@ -137,8 +141,13 @@ public class EnforcementController {
         String korStatus = body.get("status");
         String dbStatus = toDbStatus(korStatus);
         dto.setFineStatus(dbStatus != null ? dbStatus : existing.getFineStatus());
-        violationMapper.update(dto);
-        return ResponseEntity.ok(Map.of("success", true, "message", "수정이 완료되었습니다."));
+        try {
+            violationMapper.update(dto);
+            return ResponseEntity.ok(Map.of("success", true, "message", "수정이 완료되었습니다."));
+        } catch (Exception e) {
+            logger.error("[updateViolation] DB 업데이트 실패 id={}: {}", id, e.getMessage(), e);
+            return ResponseEntity.status(500).body(Map.of("success", false, "message", "수정 중 오류: " + e.getMessage()));
+        }
     }
 
     // 위반유형 영문 → 한국어
