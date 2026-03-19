@@ -17,21 +17,20 @@ public class MemberService {
         this.passwordEncoder = passwordEncoder;
     }
 
-    public MemberDTO findByUsername(String username) {
-        return memberMapper.findByUsername(username);
+    public MemberDTO findByLoginId(String loginId) {
+        return memberMapper.findByLoginId(loginId);
     }
 
-    public boolean existsByUsername(String username) {
-        return memberMapper.countByUsername(username) > 0;
+    public boolean existsByLoginId(String loginId) {
+        return memberMapper.countByLoginId(loginId) > 0;
     }
 
-    public void signup(String username, String password, String name, String email) {
+    public void signup(String loginId, String password, String name, String email) {
         MemberDTO member = new MemberDTO();
-        member.setUsername(username);
+        member.setLoginId(loginId);
         member.setPassword(passwordEncoder.encode(password));
         member.setName(name);
         member.setEmail(email);
-        member.setRole("ADMIN");
         memberMapper.insertMember(member);
     }
 
@@ -43,26 +42,25 @@ public class MemberService {
         return memberMapper.findByNameAndEmail(name, email);
     }
 
-    public MemberDTO findByUsernameAndEmail(String username, String email) {
-        return memberMapper.findByUsernameAndEmail(username, email);
+    public MemberDTO findByLoginIdAndEmail(String loginId, String email) {
+        return memberMapper.findByLoginIdAndEmail(loginId, email);
     }
 
-    public void updateProfile(String username, String name, String email, String phone) {
+    public void updateProfile(String loginId, String name, String email) {
         MemberDTO member = new MemberDTO();
-        member.setUsername(username);
+        member.setLoginId(loginId);
         member.setName(name);
         member.setEmail(email);
-        member.setPhone(phone);
         memberMapper.updateMember(member);
     }
 
-    public void changePassword(String username, String newPassword) {
-        memberMapper.updatePassword(username, passwordEncoder.encode(newPassword));
+    public void changePassword(String loginId, String newPassword) {
+        memberMapper.updatePassword(loginId, passwordEncoder.encode(newPassword));
     }
 
-    public String resetPassword(String username) {
+    public String resetPassword(String loginId) {
         String tempPassword = generateTempPassword();
-        memberMapper.updatePassword(username, passwordEncoder.encode(tempPassword));
+        memberMapper.updatePassword(loginId, passwordEncoder.encode(tempPassword));
         return tempPassword;
     }
 

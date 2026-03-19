@@ -51,23 +51,6 @@
           </div>
 
           <div class="info-row">
-            <span class="info-label">연락처</span>
-            <template v-if="!editMode">
-              <span class="info-value">{{ profile.phone }}</span>
-            </template>
-            <template v-else>
-              <div class="input-wrap">
-                <input v-model="editForm.phone" type="tel" placeholder="연락처" @input="profileError = ''" />
-              </div>
-            </template>
-          </div>
-
-          <div class="info-row">
-            <span class="info-label">권한</span>
-            <span class="info-value"><span class="badge-role">{{ profile.role }}</span></span>
-          </div>
-
-          <div class="info-row">
             <span class="info-label">가입일</span>
             <span class="info-value">{{ formatDate(profile.createdAt) }}</span>
           </div>
@@ -153,12 +136,10 @@ const profile = reactive({
   username: '',
   name: '',
   email: '',
-  phone: '',
-  role: '',
   createdAt: ''
 })
 const editMode = ref(false)
-const editForm = reactive({ name: '', email: '', phone: '' })
+const editForm = reactive({ name: '', email: '' })
 const profileLoading = ref(false)
 const profileError = ref('')
 const profileSuccess = ref('')
@@ -226,22 +207,15 @@ const saveProfile = async () => {
     triggerShake(profileShaking)
     return
   }
-  if (!editForm.phone.trim()) {
-    profileError.value = '연락처를 입력하세요.'
-    triggerShake(profileShaking)
-    return
-  }
 
   profileLoading.value = true
   try {
     await api.put('/member/profile', {
       name: editForm.name,
-      email: editForm.email,
-      phone: editForm.phone
+      email: editForm.email
     })
     profile.name = editForm.name
     profile.email = editForm.email
-    profile.phone = editForm.phone
 
     // auth store 사용자 이름도 갱신
     if (auth.user) {
@@ -302,7 +276,6 @@ onMounted(async () => {
   await fetchProfile()
   editForm.name = profile.name
   editForm.email = profile.email
-  editForm.phone = profile.phone
 })
 </script>
 

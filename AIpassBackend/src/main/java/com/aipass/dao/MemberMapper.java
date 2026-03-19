@@ -6,11 +6,11 @@ import org.apache.ibatis.annotations.Param;
 
 @Mapper
 public interface MemberMapper {
-    MemberDTO findByUsername(String username);
+    MemberDTO findByLoginId(String loginId);
     int insertMember(MemberDTO member);
-    int countByUsername(String username);
+    int countByLoginId(String loginId);
     MemberDTO findByNameAndEmail(@Param("name") String name, @Param("email") String email);
-    MemberDTO findByUsernameAndEmail(@Param("username") String username, @Param("email") String email);
-    int updatePassword(@Param("username") String username, @Param("password") String password);
+    MemberDTO findByLoginIdAndEmail(@Param("loginId") String loginId, @Param("email") String email);
+    int updatePassword(@Param("loginId") String loginId, @Param("password") String password);
     int updateMember(MemberDTO member);
 }
