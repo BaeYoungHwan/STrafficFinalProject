@@ -44,7 +44,7 @@ const isActive = (path) => {
 .app-gnb {
   display: flex;
   justify-content: center;
-  padding: 14px 40px;
+  padding: 6px 40px;
   background: #FFFFFF;
 }
 
@@ -58,8 +58,8 @@ const isActive = (path) => {
 }
 
 .gnb-item {
-  padding: 12px 20px;
-  font-size: 16px;
+  padding: 7px 16px;
+  font-size: 13px;
   font-weight: 500;
   color: #6B7280;
   text-decoration: none;

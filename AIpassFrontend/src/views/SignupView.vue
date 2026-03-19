@@ -7,7 +7,7 @@
 
         <!-- ID -->
         <div class="form-group">
-          <div class="input-row">
+          <div class="input-group input-row">
             <input
               v-model="form.username"
               type="text"
@@ -24,45 +24,52 @@
         </div>
 
         <!-- PW + Confirm PW -->
-        <div class="form-group pw-group">
-          <input
-            v-model="form.password"
-            type="password"
-            placeholder="PW"
-            autocomplete="new-password"
-            @input="resetField('password')"
-          />
-          <input
-            v-model="form.passwordConfirm"
-            type="password"
-            placeholder="Confirm PW"
-            autocomplete="new-password"
-            @input="resetField('passwordConfirm')"
-          />
+        <div class="form-group">
+          <div class="input-group">
+            <input
+              v-model="form.password"
+              type="password"
+              placeholder="PW"
+              autocomplete="new-password"
+              @input="resetField('password')"
+            />
+            <div class="input-separator"></div>
+            <input
+              v-model="form.passwordConfirm"
+              type="password"
+              placeholder="Confirm PW"
+              autocomplete="new-password"
+              @input="resetField('passwordConfirm')"
+            />
+          </div>
           <p class="field-hint" :class="{ 'hint-ok': pwFullyValid }">★ 영문 대/소문자, 숫자, 특수문자를 포함한 8~16자</p>
         </div>
 
         <!-- Name -->
         <div class="form-group">
-          <input
-            v-model="form.name"
-            type="text"
-            placeholder="Name"
-            autocomplete="name"
-            @input="resetField('name')"
-          />
+          <div class="input-group">
+            <input
+              v-model="form.name"
+              type="text"
+              placeholder="Name"
+              autocomplete="name"
+              @input="resetField('name')"
+            />
+          </div>
           <p class="field-hint" :class="{ 'hint-ok': nameValid }">★ 필수 입력 항목입니다.</p>
         </div>
 
         <!-- E-mail -->
         <div class="form-group">
-          <input
-            v-model="form.email"
-            type="email"
-            placeholder="E-mail"
-            autocomplete="email"
-            @input="resetField('email')"
-          />
+          <div class="input-group">
+            <input
+              v-model="form.email"
+              type="email"
+              placeholder="E-mail"
+              autocomplete="email"
+              @input="resetField('email')"
+            />
+          </div>
           <p class="field-hint" :class="{ 'hint-ok': emailValid }">★ 필수 입력 항목입니다.</p>
         </div>
 
@@ -245,11 +252,11 @@ const handleSignup = async () => {
 
 .signup-card {
   width: 100%;
-  max-width: 360px;
+  max-width: 380px;
   background: #FFFFFF;
-  border-radius: 16px;
-  padding: 32px 28px 28px;
-  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.08);
+  border-radius: 24px;
+  padding: 36px 32px 32px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
 }
 
 .signup-card.shake {
@@ -268,83 +275,92 @@ const handleSignup = async () => {
 
 .signup-title {
   text-align: center;
-  font-size: 20px;
-  font-weight: 700;
+  font-size: 24px;
+  font-weight: 800;
   color: #1A1A2E;
-  margin: 0 0 20px 0;
+  margin: 0 0 24px 0;
+  letter-spacing: 1px;
 }
 
 .signup-form {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .form-group {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
 }
 
-.form-group input {
-  padding: 10px 14px;
-  border: 1px solid #E2E8F0;
-  border-radius: 8px;
-  font-size: 13px;
-  color: #1A1A2E;
-  background: #F4F6FA;
-  transition: border-color 0.2s;
-  outline: none;
+.input-group {
+  background: #ECECEE;
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.input-group input {
   width: 100%;
+  padding: 14px 16px;
+  border: none;
+  font-size: 15px;
+  color: #1A1A2E;
+  background: transparent;
+  outline: none;
   box-sizing: border-box;
 }
 
-.form-group input::placeholder {
-  color: #6B7280;
+.input-group input::placeholder {
+  color: #8E8E93;
+  font-weight: 500;
 }
 
-.form-group input:focus {
-  border-color: #1A6DCC;
-  background: #FFFFFF;
+.input-separator {
+  height: 1px;
+  background: #D1D1D6;
+  margin: 0 14px;
 }
 
 .input-row {
   display: flex;
-  gap: 6px;
+  align-items: stretch;
 }
 
 .input-row input {
   flex: 1;
+  min-width: 0;
 }
 
 .btn-check {
-  padding: 0 12px;
-  background: #E2E8F0;
+  padding: 0 16px;
+  background: #D1D1D6;
   color: #1A1A2E;
   border: none;
-  border-radius: 8px;
-  font-size: 11px;
+  border-radius: 10px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
-  transition: background 0.2s;
+  transition: opacity 0.15s ease;
+  margin: 6px 6px 6px 0;
 }
 
 .btn-check:hover:not(:disabled) {
-  background: #cbd5e1;
+  opacity: 0.8;
 }
 
 .btn-check:disabled {
-  background: #E8F1FB;
-  color: #6B7280;
+  color: #8E8E93;
   cursor: not-allowed;
+  opacity: 0.6;
 }
 
-/* 항상 보이는 힌트 (빨간색 → 충족 시 초록) */
+/* 힌트 (빨간색 → 충족 시 초록) */
 .field-hint {
   color: #EF4444;
-  font-size: 11px;
-  margin: 1px 0 0 2px;
+  font-size: 12px;
+  margin: 2px 0 0 4px;
   font-weight: 500;
 }
 
@@ -355,21 +371,21 @@ const handleSignup = async () => {
 /* 에러/성공 메시지 */
 .field-error {
   color: #EF4444;
-  font-size: 11px;
-  margin: 1px 0 0 2px;
+  font-size: 12px;
+  margin: 2px 0 0 4px;
   font-weight: 500;
 }
 
 .field-success {
   color: #10B981;
-  font-size: 11px;
-  margin: 1px 0 0 2px;
+  font-size: 12px;
+  margin: 2px 0 0 4px;
   font-weight: 500;
 }
 
 .global-error {
   color: #EF4444;
-  font-size: 12px;
+  font-size: 13px;
   margin: 0;
   text-align: center;
   font-weight: 500;
@@ -377,40 +393,44 @@ const handleSignup = async () => {
 
 .btn-signup {
   width: 100%;
-  padding: 12px;
-  background: #1A6DCC;
+  padding: 16px;
+  background: #007AFF;
   color: #FFFFFF;
   border: none;
-  border-radius: 8px;
-  font-size: 14px;
+  border-radius: 14px;
+  font-size: 17px;
   font-weight: 700;
   cursor: pointer;
-  transition: background 0.2s;
-  margin-top: 4px;
+  transition: opacity 0.15s ease, transform 0.1s ease;
+  margin-top: 6px;
 }
 
 .btn-signup:hover:not(:disabled) {
-  background: #1457A8;
+  opacity: 0.88;
+}
+
+.btn-signup:active:not(:disabled) {
+  transform: scale(0.98);
 }
 
 .btn-signup:disabled {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
 .signup-footer {
   text-align: center;
-  margin-top: 12px;
+  margin-top: 16px;
 }
 
 .btn-back {
   color: #6B7280;
-  font-size: 12px;
+  font-size: 13px;
   text-decoration: none;
 }
 
 .btn-back:hover {
-  color: #1A6DCC;
+  color: #1A1A2E;
   text-decoration: underline;
 }
 </style>

@@ -4,7 +4,7 @@
       <h2 class="login-title">LOGIN</h2>
 
       <form @submit.prevent="handleLogin" class="login-form" novalidate>
-        <div class="form-group">
+        <div class="input-group">
           <input
             id="username"
             v-model="form.username"
@@ -13,8 +13,7 @@
             required
             autocomplete="username"
           />
-        </div>
-        <div class="form-group">
+          <div class="input-separator"></div>
           <input
             id="password"
             v-model="form.password"
@@ -86,105 +85,117 @@ const handleLogin = async () => {
 
 .login-card {
   width: 100%;
-  max-width: 360px;
+  max-width: 380px;
   background: #FFFFFF;
-  border-radius: 16px;
-  padding: 40px 28px 32px;
-  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.08);
+  border-radius: 24px;
+  padding: 44px 32px 36px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
   text-align: center;
 }
 
 .login-title {
-  font-size: 24px;
+  font-size: 26px;
   font-weight: 800;
   color: #1A1A2E;
-  margin: 0 0 32px 0;
+  margin: 0 0 28px 0;
   letter-spacing: 2px;
 }
 
 .login-form {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
 
-.form-group input {
+.input-group {
+  background: #ECECEE;
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.input-group input {
   width: 100%;
-  padding: 14px 18px;
-  border: 1px solid #E2E8F0;
-  border-radius: 10px;
-  font-size: 14px;
+  padding: 16px 18px;
+  border: none;
+  font-size: 16px;
   color: #1A1A2E;
-  background: #F4F6FA;
-  transition: border-color 0.2s, background 0.2s;
+  background: transparent;
   outline: none;
   box-sizing: border-box;
 }
 
-.form-group input::placeholder {
-  color: #6B7280;
+.input-group input::placeholder {
+  color: #8E8E93;
   font-weight: 500;
 }
 
-.form-group input:focus {
-  border-color: #1A6DCC;
-  background: #FFFFFF;
+.input-separator {
+  height: 1px;
+  background: #D1D1D6;
+  margin: 0 16px;
 }
 
 .error-msg {
   color: #EF4444;
   font-size: 13px;
-  margin: 4px 0 0 0;
+  margin: 2px 0 0 0;
   text-align: center;
 }
 
 .btn-login {
   width: 100%;
-  padding: 14px;
-  background: #1A6DCC;
+  padding: 16px;
+  background: #007AFF;
   color: #ffffff;
   border: none;
-  border-radius: 10px;
-  font-size: 15px;
+  border-radius: 14px;
+  font-size: 17px;
   font-weight: 700;
   cursor: pointer;
-  transition: background 0.2s;
-  letter-spacing: 2px;
-  margin-top: 8px;
+  transition: opacity 0.15s ease, transform 0.1s ease;
+  letter-spacing: 1px;
 }
 
 .btn-login:hover:not(:disabled) {
-  background: #1457A8;
+  opacity: 0.88;
+}
+
+.btn-login:active:not(:disabled) {
+  transform: scale(0.98);
 }
 
 .btn-login:disabled {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
 .btn-signup {
   width: 100%;
-  padding: 14px;
-  background: #E2E8F0;
+  padding: 16px;
+  background: #E5E5EA;
   color: #1A1A2E;
   border: none;
-  border-radius: 10px;
-  font-size: 15px;
+  border-radius: 14px;
+  font-size: 17px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: opacity 0.15s ease, transform 0.1s ease;
   margin-top: 10px;
 }
 
 .btn-signup:hover {
-  background: #cbd5e1;
+  opacity: 0.88;
+}
+
+.btn-signup:active {
+  transform: scale(0.98);
 }
 
 .link-forgot {
   display: inline-block;
   margin-top: 16px;
   color: #EF4444;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   text-decoration: none;
 }
