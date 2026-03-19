@@ -1,23 +1,39 @@
 <template>
   <div class="enforcement">
-    <h1 class="page-title">단속 내역</h1>
+    <!-- 실시간 과속 확인 -->
+    <div class="speed-banner">
+      <span class="speed-banner-label">* 실시간 과속 확인</span>
+      <button class="speed-banner-link" @click="showStreamModal = true">더보기</button>
+    </div>
+
+    <div class="section-divider"></div>
+
+    <!-- 위반 차량 상세 정보 조회 -->
+    <div class="section-header">
+      <h2 class="section-title">* 위반 차량 상세 정보 조회</h2>
+      <button class="btn-refresh" @click="fetchList" title="새로 고침">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+        </svg>
+        새로 고침
+      </button>
+    </div>
 
     <!-- 필터 패널 -->
     <div class="filter-panel">
       <div class="filter-row">
         <div class="filter-item">
-          <label>차량번호</label>
           <input
             v-model="filters.plateNumber"
             type="text"
-            placeholder="차량번호 입력"
+            placeholder="차량번호 검색"
             @keyup.enter="search"
           />
         </div>
         <div class="filter-item">
-          <label>위반유형</label>
           <select v-model="filters.violationType">
-            <option value="">전체</option>
+            <option value="">위반 유형 검색</option>
             <option value="과속">과속</option>
             <option value="신호위반">신호위반</option>
             <option value="중앙선 침범">중앙선 침범</option>
@@ -25,16 +41,15 @@
           </select>
         </div>
         <div class="filter-item">
-          <label>상태</label>
           <select v-model="filters.status">
-            <option value="">전체</option>
+            <option value="">상태 필터</option>
             <option value="대기중">대기중</option>
             <option value="승인">승인</option>
             <option value="반려">반려</option>
           </select>
         </div>
         <div class="filter-actions">
-          <button class="btn-search" @click="search">조회</button>
+          <button class="btn-search" @click="search">검 색</button>
           <button class="btn-reset" @click="reset">초기화</button>
         </div>
       </div>
@@ -97,7 +112,11 @@
       <div class="detail-section" v-if="selectedItem">
         <div class="detail-header">
           <span class="detail-title">상세 정보</span>
-          <button class="btn-close" @click="selectedItem = null">✕</button>
+          <div class="detail-header-actions">
+            <button v-if="!editMode" class="btn-edit" @click="startEdit">수정</button>
+            <button v-else class="btn-cancel-edit" @click="editMode = false">취소</button>
+            <button class="btn-close" @click="selectedItem = null; editMode = false">✕</button>
+          </div>
         </div>
 
         <!-- 차량 이미지 -->
@@ -109,6 +128,7 @@
           />
           <div v-else class="no-image">이미지 없음</div>
         </div>
+        <div class="ocr-label">번호판 인식 결과 ▶</div>
 
         <!-- 상세 정보 테이블 -->
         <table class="detail-table">
@@ -118,11 +138,22 @@
           </tr>
           <tr>
             <th>차량번호</th>
-            <td>{{ selectedItem.plateNumber }}</td>
+            <td>
+              <template v-if="!editMode">{{ selectedItem.plateNumber }}</template>
+              <input v-else v-model="editForm.plateNumber" class="edit-input" />
+            </td>
           </tr>
           <tr>
             <th>위반유형</th>
-            <td>{{ selectedItem.violationType }}</td>
+            <td>
+              <template v-if="!editMode">{{ selectedItem.violationType }}</template>
+              <select v-else v-model="editForm.violationType" class="edit-select">
+                <option>과속</option>
+                <option>신호위반</option>
+                <option>중앙선 침범</option>
+                <option>차선 위반</option>
+              </select>
+            </td>
           </tr>
           <tr v-if="selectedItem.speedKmh">
             <th>속도</th>
@@ -135,7 +166,14 @@
           <tr>
             <th>상태</th>
             <td>
-              <span class="badge" :class="statusClass(selectedItem)">{{ statusLabel(selectedItem) }}</span>
+              <template v-if="!editMode">
+                <span class="badge" :class="statusClass(selectedItem)">{{ statusLabel(selectedItem) }}</span>
+              </template>
+              <select v-else v-model="editForm.fineStatus" class="edit-select">
+                <option>대기중</option>
+                <option>승인</option>
+                <option>반려</option>
+              </select>
             </td>
           </tr>
           <tr>
@@ -144,19 +182,46 @@
           </tr>
         </table>
 
-        <!-- 액션 버튼 -->
-        <div class="detail-actions" v-if="selectedItem.fineStatus === 'UNPROCESSED' || !selectedItem.fineStatus">
-          <button class="btn-approve" :disabled="submitting" @click="updateStatus('승인')">
-            {{ submitting ? '처리 중...' : '승인' }}
-          </button>
-          <button class="btn-reject" :disabled="submitting" @click="updateStatus('반려')">
-            {{ submitting ? '처리 중...' : '반려' }}
+        <!-- 완료 안내 문구 -->
+        <div v-if="editSuccess" class="edit-success-msg">✓ 수정이 완료되었습니다.</div>
+
+        <!-- 수정 모드 업데이트 버튼 -->
+        <div class="detail-actions" v-if="editMode">
+          <button class="btn-update" :disabled="submitting" @click="updateViolation">
+            {{ submitting ? '저장 중...' : '업데이트' }}
           </button>
         </div>
-        <div class="detail-actions" v-else>
-          <p class="status-done">처리 완료 ({{ statusLabel(selectedItem) }})</p>
-        </div>
+
+        <!-- 기존 승인/반려 버튼 -->
+        <template v-else>
+          <div class="detail-actions" v-if="selectedItem.fineStatus === 'UNPROCESSED' || !selectedItem.fineStatus">
+            <button class="btn-approve" :disabled="submitting" @click="updateStatus('승인')">
+              {{ submitting ? '처리 중...' : '승인' }}
+            </button>
+            <button class="btn-reject" :disabled="submitting" @click="updateStatus('반려')">
+              {{ submitting ? '처리 중...' : '반려' }}
+            </button>
+          </div>
+          <div class="detail-actions" v-else>
+            <p class="status-done">처리 완료 ({{ statusLabel(selectedItem) }})</p>
+          </div>
+        </template>
       </div>
+    </div>
+  </div>
+
+  <!-- 실시간 스트리밍 모달 -->
+  <div v-if="showStreamModal" class="stream-modal-overlay" @click.self="showStreamModal = false">
+    <div class="stream-modal">
+      <div class="stream-modal-header">
+        <span>실시간 과속 감지 모니터</span>
+        <button class="btn-close" @click="showStreamModal = false">✕</button>
+      </div>
+      <img
+        src="http://127.0.0.1:8000/api/v1/stream/video"
+        alt="실시간 스트리밍"
+        class="stream-img"
+      />
     </div>
   </div>
 </template>
@@ -169,6 +234,14 @@ const items = ref([])
 const loading = ref(false)
 const submitting = ref(false)
 const selectedItem = ref(null)
+
+// 수정 모드
+const editMode = ref(false)
+const editForm = reactive({ plateNumber: '', violationType: '', fineStatus: '' })
+const editSuccess = ref(false)
+
+// 스트리밍 모달
+const showStreamModal = ref(false)
 
 const page = ref(1)
 const size = ref(10)
@@ -193,7 +266,7 @@ const statusClass = (item) => {
   const s = item.fineStatus || item.status
   if (s === 'APPROVED' || s === '승인') return 'badge-green'
   if (s === 'REJECTED' || s === '반려') return 'badge-red'
-  return 'badge-yellow'
+  return 'badge-gray'
 }
 
 const statusLabel = (item) => {
@@ -245,6 +318,40 @@ const changePage = (p) => {
 
 const selectItem = (item) => {
   selectedItem.value = item
+  editMode.value = false
+  editSuccess.value = false
+}
+
+const startEdit = () => {
+  const s = selectedItem.value
+  editForm.plateNumber = s.plateNumber
+  editForm.violationType = s.violationType
+  editForm.fineStatus = statusLabel(s)  // '대기중' / '승인' / '반려'
+  editMode.value = true
+}
+
+const updateViolation = async () => {
+  submitting.value = true
+  try {
+    await api.put(`/enforcement/violations/${selectedItem.value.violationId}`, {
+      plateNumber: editForm.plateNumber,
+      violationType: editForm.violationType,
+      status: editForm.fineStatus
+    })
+    const statusMap = { '승인': 'APPROVED', '반려': 'REJECTED', '대기중': 'UNPROCESSED' }
+    selectedItem.value.plateNumber = editForm.plateNumber
+    selectedItem.value.violationType = editForm.violationType
+    selectedItem.value.fineStatus = statusMap[editForm.fineStatus] ?? 'UNPROCESSED'
+    const idx = items.value.findIndex(i => i.violationId === selectedItem.value.violationId)
+    if (idx !== -1) Object.assign(items.value[idx], selectedItem.value)
+    editMode.value = false
+    editSuccess.value = true
+    setTimeout(() => { editSuccess.value = false }, 3000)
+  } catch (e) {
+    alert('수정에 실패했습니다.')
+  } finally {
+    submitting.value = false
+  }
 }
 
 const updateStatus = async (newStatus) => {
@@ -269,99 +376,164 @@ onMounted(fetchList)
 .enforcement {
   padding: 24px;
   max-width: 1400px;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
 }
 
-.page-title {
-  font-size: 22px;
+/* 실시간 과속 확인 배너 */
+.speed-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.speed-banner-label {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1A1A2E;
+}
+
+.speed-banner-link {
+  font-size: 13px;
+  color: #6B7280;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.speed-banner-link:hover {
+  color: #1A6DCC;
+}
+
+.section-divider {
+  height: 1px;
+  background: #E2E8F0;
+  margin-bottom: 20px;
+}
+
+/* 섹션 헤더 */
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.section-title {
+  font-size: 16px;
   font-weight: 700;
-  color: #1F3864;
-  margin: 0 0 20px 0;
+  color: #1A1A2E;
+  margin: 0;
+}
+
+.btn-refresh {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  background: #1A6DCC;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-refresh:hover {
+  background: #1457A8;
+  transform: translateY(-1px);
 }
 
 /* 필터 패널 */
 .filter-panel {
   background: #fff;
-  border-radius: 10px;
+  border-radius: 16px;
   padding: 18px 20px;
-  box-shadow: 0 2px 10px rgba(30, 56, 100, 0.06);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
   margin-bottom: 18px;
+  border: 1px solid rgba(226, 232, 240, 0.6);
 }
 
 .filter-row {
   display: flex;
-  align-items: flex-end;
-  gap: 16px;
+  align-items: center;
+  gap: 12px;
   flex-wrap: wrap;
 }
 
 .filter-item {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  min-width: 160px;
-}
-
-.filter-item label {
-  font-size: 12px;
-  font-weight: 600;
-  color: #6B7280;
+  flex: 1;
+  min-width: 150px;
 }
 
 .filter-item input,
 .filter-item select {
-  padding: 8px 12px;
+  width: 100%;
+  padding: 10px 14px;
   border: 1px solid #E2E8F0;
-  border-radius: 6px;
+  border-radius: 10px;
   font-size: 13px;
   color: #1A1A2E;
-  background: #fafbfd;
+  background: #fff;
   outline: none;
-  transition: border-color 0.2s;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+
+.filter-item input::placeholder {
+  color: #9CA3AF;
 }
 
 .filter-item input:focus,
 .filter-item select:focus {
   border-color: #1A6DCC;
+  box-shadow: 0 0 0 3px rgba(26, 109, 204, 0.12);
   background: #fff;
 }
 
 .filter-actions {
   display: flex;
   gap: 8px;
-  align-items: flex-end;
-  padding-bottom: 1px;
+  align-items: center;
+  flex-shrink: 0;
 }
 
 .btn-search {
-  padding: 8px 20px;
+  padding: 10px 24px;
   background: #1A6DCC;
   color: #fff;
   border: none;
-  border-radius: 6px;
+  border-radius: 10px;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.2s ease;
+  font-family: inherit;
+  letter-spacing: 0.3px;
 }
 
 .btn-search:hover {
   background: #1457A8;
+  transform: translateY(-1px);
 }
 
 .btn-reset {
-  padding: 8px 16px;
-  background: #f0f0f0;
-  color: #555;
+  padding: 10px 18px;
+  background: #E5E7EB;
+  color: #4B5563;
   border: none;
-  border-radius: 6px;
+  border-radius: 10px;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.2s ease;
+  font-family: inherit;
 }
 
 .btn-reset:hover {
-  background: #e0e0e0;
+  background: #D1D5DB;
 }
 
 /* 콘텐츠 영역 */
@@ -374,9 +546,10 @@ onMounted(fetchList)
   flex: 1;
   min-width: 0;
   background: #fff;
-  border-radius: 10px;
-  box-shadow: 0 2px 10px rgba(30, 56, 100, 0.06);
+  border-radius: 16px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
   overflow: hidden;
+  border: 1px solid rgba(226, 232, 240, 0.6);
 }
 
 /* 테이블 */
@@ -390,20 +563,20 @@ table {
 }
 
 thead tr {
-  background: #F1F5FB;
+  background: #1A1A2E;
+  border-radius: 12px 12px 0 0;
 }
 
 th {
-  padding: 12px 14px;
+  padding: 13px 16px;
   text-align: left;
-  font-size: 12px;
-  font-weight: 700;
-  color: #6B7280;
-  border-bottom: 1px solid #E2E8F0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #FFFFFF;
 }
 
 td {
-  padding: 12px 14px;
+  padding: 12px 16px;
   font-size: 13px;
   color: #1A1A2E;
   border-bottom: 1px solid #F1F5FB;
@@ -411,15 +584,15 @@ td {
 
 tbody tr {
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background 0.15s ease;
 }
 
 tbody tr:hover {
-  background: #F8FAFD;
+  background: rgba(26, 109, 204, 0.04);
 }
 
 tbody tr.selected {
-  background: #EBF3FF;
+  background: rgba(26, 109, 204, 0.08);
 }
 
 .location-cell {
@@ -439,25 +612,25 @@ tbody tr.selected {
 /* 상태 뱃지 */
 .badge {
   display: inline-block;
-  padding: 3px 10px;
-  border-radius: 12px;
-  font-size: 11px;
-  font-weight: 700;
+  padding: 4px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .badge-green {
-  background: #D1FAE5;
+  background: rgba(16, 185, 129, 0.12);
   color: #059669;
 }
 
 .badge-red {
-  background: #FEE2E2;
+  background: rgba(239, 68, 68, 0.12);
   color: #DC2626;
 }
 
-.badge-yellow {
-  background: #FEF3C7;
-  color: #D97706;
+.badge-gray {
+  background: rgba(107, 114, 128, 0.12);
+  color: #4B5563;
 }
 
 /* 페이지네이션 */
@@ -474,14 +647,17 @@ tbody tr.selected {
   border: 1px solid #E2E8F0;
   background: #fff;
   color: #4B5563;
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 13px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.15s ease;
+  font-family: inherit;
 }
 
 .pagination button:hover:not(:disabled) {
-  background: #F1F5FB;
+  background: rgba(26, 109, 204, 0.04);
+  border-color: #1A6DCC;
+  color: #1A6DCC;
 }
 
 .pagination button.active {
@@ -497,35 +673,36 @@ tbody tr.selected {
 
 /* 상세 패널 */
 .detail-section {
-  width: 320px;
+  width: 340px;
   flex-shrink: 0;
   background: #fff;
-  border-radius: 10px;
-  box-shadow: 0 2px 10px rgba(30, 56, 100, 0.06);
-  padding: 18px;
+  border-radius: 16px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  padding: 20px;
   display: flex;
   flex-direction: column;
   gap: 14px;
   align-self: flex-start;
+  border: 1px solid rgba(226, 232, 240, 0.6);
 }
 
 .detail-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-bottom: 10px;
+  padding-bottom: 12px;
   border-bottom: 1px solid #E2E8F0;
 }
 
 .detail-title {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 700;
-  color: #1F3864;
+  color: #1A1A2E;
 }
 
 .btn-close {
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   border: none;
   background: #F1F5FB;
   border-radius: 50%;
@@ -535,6 +712,7 @@ tbody tr.selected {
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: background 0.2s ease;
 }
 
 .btn-close:hover {
@@ -546,7 +724,7 @@ tbody tr.selected {
   width: 100%;
   height: 160px;
   background: #F1F5FB;
-  border-radius: 8px;
+  border-radius: 12px;
   overflow: hidden;
   display: flex;
   align-items: center;
@@ -564,6 +742,13 @@ tbody tr.selected {
   color: #9CA3AF;
 }
 
+.ocr-label {
+  font-size: 12px;
+  color: #6B7280;
+  font-weight: 500;
+  margin-top: -6px;
+}
+
 /* 상세 테이블 */
 .detail-table {
   width: 100%;
@@ -571,8 +756,8 @@ tbody tr.selected {
 }
 
 .detail-table th {
-  width: 70px;
-  padding: 8px 10px;
+  width: 72px;
+  padding: 9px 10px;
   font-size: 12px;
   font-weight: 600;
   color: #6B7280;
@@ -581,7 +766,7 @@ tbody tr.selected {
 }
 
 .detail-table td {
-  padding: 8px 10px;
+  padding: 9px 10px;
   font-size: 13px;
   color: #1A1A2E;
   border-bottom: 1px solid #F1F5FB;
@@ -596,36 +781,40 @@ tbody tr.selected {
 
 .btn-approve {
   flex: 1;
-  padding: 10px;
+  padding: 11px;
   background: #10B981;
   color: #fff;
   border: none;
-  border-radius: 7px;
+  border-radius: 10px;
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.2s ease;
+  font-family: inherit;
 }
 
 .btn-approve:hover:not(:disabled) {
   background: #059669;
+  transform: translateY(-1px);
 }
 
 .btn-reject {
   flex: 1;
-  padding: 10px;
+  padding: 11px;
   background: #EF4444;
   color: #fff;
   border: none;
-  border-radius: 7px;
+  border-radius: 10px;
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.2s ease;
+  font-family: inherit;
 }
 
 .btn-reject:hover:not(:disabled) {
   background: #DC2626;
+  transform: translateY(-1px);
 }
 
 .btn-approve:disabled,
@@ -640,6 +829,154 @@ tbody tr.selected {
   margin: 0;
   text-align: center;
   width: 100%;
+}
+
+/* 수정 모드 */
+.detail-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-edit {
+  padding: 5px 12px;
+  background: #1A6DCC;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+  font-family: inherit;
+}
+
+.btn-edit:hover {
+  background: #1457A8;
+}
+
+.btn-cancel-edit {
+  padding: 5px 12px;
+  background: #E5E7EB;
+  color: #4B5563;
+  border: none;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.edit-input {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid #1A6DCC;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #1A1A2E;
+  outline: none;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+
+.edit-select {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid #1A6DCC;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #1A1A2E;
+  background: #fff;
+  outline: none;
+  font-family: inherit;
+}
+
+.btn-update {
+  flex: 1;
+  padding: 11px;
+  background: #1A6DCC;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.btn-update:hover:not(:disabled) {
+  background: #1457A8;
+  transform: translateY(-1px);
+}
+
+.btn-update:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.edit-success-msg {
+  background: rgba(16, 185, 129, 0.12);
+  color: #059669;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 14px;
+  border-radius: 10px;
+  text-align: center;
+}
+
+/* 스트리밍 모달 */
+.stream-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.stream-modal {
+  background: #1A1A2E;
+  border-radius: 16px;
+  overflow: hidden;
+  width: 860px;
+  max-width: 95vw;
+}
+
+.stream-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.stream-modal-header .btn-close {
+  background: rgba(255,255,255,0.1);
+  color: #fff;
+}
+
+.stream-modal-header .btn-close:hover {
+  background: rgba(255,255,255,0.2);
+}
+
+.stream-img {
+  display: block;
+  width: 100%;
+  max-height: 540px;
+  object-fit: contain;
+  background: #000;
+}
+
+/* speed-banner-link를 button으로 변경 시 스타일 유지 */
+button.speed-banner-link {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
 }
 
 @media (max-width: 900px) {

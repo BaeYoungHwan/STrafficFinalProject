@@ -121,6 +121,26 @@ public class EnforcementController {
         return ResponseEntity.ok(Map.of("success", true, "message", "상태가 변경되었습니다."));
     }
 
+    /**
+     * 단속 내역 수정: 차량번호, 위반유형, 상태 변경 + is_corrected=true
+     */
+    @PutMapping("/violations/{id}")
+    public ResponseEntity<?> updateViolation(@PathVariable Long id, @RequestBody Map<String, String> body) {
+        ViolationDTO existing = violationMapper.findById(id);
+        if (existing == null) {
+            return ResponseEntity.status(404).body(Map.of("success", false, "message", "해당 단속 내역을 찾을 수 없습니다."));
+        }
+        ViolationDTO dto = new ViolationDTO();
+        dto.setViolationId(id);
+        dto.setPlateNumber(body.getOrDefault("plateNumber", existing.getPlateNumber()));
+        dto.setViolationType(body.getOrDefault("violationType", existing.getViolationType()));
+        String korStatus = body.get("status");
+        String dbStatus = toDbStatus(korStatus);
+        dto.setFineStatus(dbStatus != null ? dbStatus : existing.getFineStatus());
+        violationMapper.update(dto);
+        return ResponseEntity.ok(Map.of("success", true, "message", "수정이 완료되었습니다."));
+    }
+
     // 위반유형 영문 → 한국어
     private String translateViolationType(String raw) {
         if (raw == null) return "기타";

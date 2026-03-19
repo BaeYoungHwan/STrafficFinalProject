@@ -123,6 +123,7 @@ app.add_middleware(
 # API 라우터 등록
 app.include_router(stream.router, prefix="/api/v1")
 app.mount("/demo", StaticFiles(directory="static", html=True), name="demo")
+app.mount("/images", StaticFiles(directory="data"), name="images")
 
 # ------------------------------------------
 # Endpoints

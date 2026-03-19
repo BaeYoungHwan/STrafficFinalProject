@@ -67,4 +67,13 @@
         UPDATE violation_log SET fine_status = #{status} WHERE violation_id = #{id}
     </update>
 
+    <update id="update" parameterType="com.aipass.dto.ViolationDTO">
+        UPDATE violation_log
+        SET plate_number   = #{plateNumber},
+            violation_type = #{violationType},
+            fine_status    = #{fineStatus},
+            is_corrected   = true
+        WHERE violation_id = #{violationId}
+    </update>
+
 </mapper>
