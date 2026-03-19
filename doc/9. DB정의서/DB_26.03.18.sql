@@ -339,3 +339,14 @@ CREATE TABLE maintenance_log (
 - member (회원 정보): 이 통합 관제 시스템에 로그인할 수 있는 관리자 전용 계정(아이디, 비밀번호 등)을 관리함.
 =============================================================================
 */
+
+  ALTER TABLE violation_log       
+  ADD COLUMN IF NOT EXISTS event_id  VARCHAR(100) UNIQUE,
+  ADD COLUMN IF NOT EXISTS speed_kmh DECIMAL(5,1);     
+
+
+  ALTER TABLE violation_log ALTER COLUMN intersection_id DROP NOT NULL; 
+
+
+  
+	
