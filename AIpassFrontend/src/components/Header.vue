@@ -61,7 +61,6 @@ const handleLogout = async () => {
 
 .header-right {
   display: flex;
-  align-items: center;
   gap: 20px;
 }
 
