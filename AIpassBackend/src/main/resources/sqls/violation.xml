@@ -64,7 +64,7 @@
     </insert>
 
     <update id="updateStatus">
-        UPDATE violation_log SET fine_status = #{fineStatus} WHERE violation_id = #{id}
+        UPDATE violation_log SET fine_status = #{status} WHERE violation_id = #{id}
     </update>
 
 </mapper>
