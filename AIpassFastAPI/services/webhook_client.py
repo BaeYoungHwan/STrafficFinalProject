@@ -13,7 +13,7 @@ FALLBACK_FILE = "data/fallback_queue.jsonl"
 
 class WebhookClient:
     def __init__(self):
-        self.target_url = getattr(settings, "WEBHOOK_URL", "http://localhost:8080/api/violations")
+        self.target_url = getattr(settings, "WEBHOOK_URL", f"{settings.BACKEND_URL}/api/enforcement/webhook")
         self.timeout = 3.0
         self._lock = asyncio.Lock()  # 파일 I/O 정합성 보장용
 

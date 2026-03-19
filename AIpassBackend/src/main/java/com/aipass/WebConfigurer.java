@@ -34,7 +34,8 @@ public class WebConfigurer implements WebMvcConfigurer {
                         "/api/auth/check-username",
                         "/api/auth/find-id",
                         "/api/auth/verify-reset",
-                        "/api/auth/reset-password"
+                        "/api/auth/reset-password",
+                        "/api/enforcement/webhook"
                 );
     }
 }

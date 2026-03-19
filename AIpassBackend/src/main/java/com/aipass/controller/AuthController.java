@@ -28,14 +28,14 @@ public class AuthController {
                     .body(Map.of("message", "아이디와 비밀번호를 입력하세요."));
         }
 
-        MemberDTO member = memberService.findByUsername(request.getUsername());
+        MemberDTO member = memberService.findByLoginId(request.getUsername());
         if (member == null || !memberService.checkPassword(request.getPassword(), member.getPassword())) {
             return ResponseEntity.status(401)
                     .body(Map.of("message", "아이디 또는 비밀번호가 일치하지 않습니다."));
         }
 
         session.setAttribute("loginMember", member);
-        return ResponseEntity.ok(new LoginResponse(member.getUsername(), member.getName(), member.getRole()));
+        return ResponseEntity.ok(new LoginResponse(member.getLoginId(), member.getName()));
     }
 
     @PostMapping("/logout")
@@ -51,12 +51,12 @@ public class AuthController {
             return ResponseEntity.status(401)
                     .body(Map.of("message", "로그인이 필요합니다."));
         }
-        return ResponseEntity.ok(new LoginResponse(member.getUsername(), member.getName(), member.getRole()));
+        return ResponseEntity.ok(new LoginResponse(member.getLoginId(), member.getName()));
     }
 
     @GetMapping("/check-username")
     public ResponseEntity<?> checkUsername(@RequestParam String username) {
-        boolean exists = memberService.existsByUsername(username);
+        boolean exists = memberService.existsByLoginId(username);
         return ResponseEntity.ok(Map.of("exists", exists));
     }
 
@@ -80,9 +80,9 @@ public class AuthController {
                     .body(Map.of("message", "일치하는 계정을 찾을 수 없습니다."));
         }
 
-        String username = member.getUsername();
-        String masked = username.substring(0, Math.min(2, username.length()))
-                + "*".repeat(Math.max(0, username.length() - 2));
+        String loginId = member.getLoginId();
+        String masked = loginId.substring(0, Math.min(2, loginId.length()))
+                + "*".repeat(Math.max(0, loginId.length() - 2));
 
         return ResponseEntity.ok(Map.of("username", masked));
     }
@@ -101,7 +101,7 @@ public class AuthController {
                     .body(Map.of("message", "올바른 이메일 형식을 입력하세요."));
         }
 
-        MemberDTO member = memberService.findByUsernameAndEmail(username, email);
+        MemberDTO member = memberService.findByLoginIdAndEmail(username, email);
         if (member == null) {
             return ResponseEntity.status(404)
                     .body(Map.of("message", "일치하는 계정을 찾을 수 없습니다."));
@@ -133,7 +133,7 @@ public class AuthController {
                     .body(Map.of("message", "비밀번호는 8~16자, 영문 대/소문자, 숫자, 특수문자를 포함해야 합니다."));
         }
 
-        MemberDTO member = memberService.findByUsernameAndEmail(username, email);
+        MemberDTO member = memberService.findByLoginIdAndEmail(username, email);
         if (member == null) {
             return ResponseEntity.status(404)
                     .body(Map.of("message", "일치하는 계정을 찾을 수 없습니다."));
@@ -165,7 +165,7 @@ public class AuthController {
             return ResponseEntity.badRequest()
                     .body(Map.of("message", "올바른 이메일을 입력하세요."));
         }
-        if (memberService.existsByUsername(request.getUsername())) {
+        if (memberService.existsByLoginId(request.getUsername())) {
             return ResponseEntity.status(409)
                     .body(Map.of("message", "이미 사용 중인 아이디입니다."));
         }

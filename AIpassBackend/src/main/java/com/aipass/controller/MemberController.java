@@ -26,14 +26,12 @@ public class MemberController {
                     .body(Map.of("message", "로그인이 필요합니다."));
         }
 
-        MemberDTO fresh = memberService.findByUsername(member.getUsername());
+        MemberDTO fresh = memberService.findByLoginId(member.getLoginId());
         return ResponseEntity.ok(Map.of(
-                "username", fresh.getUsername(),
+                "username", fresh.getLoginId(),
                 "name", fresh.getName(),
                 "email", fresh.getEmail(),
-                "phone", fresh.getPhone(),
-                "role", fresh.getRole(),
-                "createdAt", fresh.getCreatedAt().toString()
+                "createdAt", fresh.getCreatedAt() != null ? fresh.getCreatedAt().toString() : ""
         ));
     }
 
@@ -47,7 +45,6 @@ public class MemberController {
 
         String name = request.get("name");
         String email = request.get("email");
-        String phone = request.get("phone");
 
         if (name == null || name.isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("message", "이름을 입력하세요."));
@@ -55,13 +52,10 @@ public class MemberController {
         if (email == null || !email.contains("@")) {
             return ResponseEntity.badRequest().body(Map.of("message", "올바른 이메일을 입력하세요."));
         }
-        if (phone == null || phone.isBlank()) {
-            return ResponseEntity.badRequest().body(Map.of("message", "연락처를 입력하세요."));
-        }
 
-        memberService.updateProfile(member.getUsername(), name, email, phone);
+        memberService.updateProfile(member.getLoginId(), name, email);
 
-        MemberDTO updated = memberService.findByUsername(member.getUsername());
+        MemberDTO updated = memberService.findByLoginId(member.getLoginId());
         session.setAttribute("loginMember", updated);
 
         return ResponseEntity.ok(Map.of("message", "회원정보가 수정되었습니다."));
@@ -85,13 +79,13 @@ public class MemberController {
             return ResponseEntity.badRequest().body(Map.of("message", "새 비밀번호는 8자 이상이어야 합니다."));
         }
 
-        MemberDTO fresh = memberService.findByUsername(member.getUsername());
+        MemberDTO fresh = memberService.findByLoginId(member.getLoginId());
         if (!memberService.checkPassword(currentPassword, fresh.getPassword())) {
             return ResponseEntity.status(400)
                     .body(Map.of("message", "현재 비밀번호가 일치하지 않습니다."));
         }
 
-        memberService.changePassword(member.getUsername(), newPassword);
+        memberService.changePassword(member.getLoginId(), newPassword);
         return ResponseEntity.ok(Map.of("message", "비밀번호가 변경되었습니다."));
     }
 }
