@@ -13,6 +13,7 @@ venv/
 /backend/target/
 /backend/bin/
 .gradle/
+AIpassBackend/src/main/resources/application.properties
 
 # 3. Frontend (Vue.js / Node)
 /frontend/node_modules/
