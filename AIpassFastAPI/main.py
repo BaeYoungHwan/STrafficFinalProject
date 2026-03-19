@@ -41,7 +41,25 @@ async def lifespan(app: FastAPI):
         
         # 2. 통신 클라이언트(Retry Queue) 켜기
         await http_client.start()
-        
+
+        # [DB 연동] Spring Boot가 DB에서 조회한 AI 대상 CCTV URL을 받아 적용
+        # 향후 구현: DB에 CCTV 정보 저장 → Spring Boot /api/cctv/ai-target 에서 조회 → 여기서 수신
+        # 현재: .env의 VIDEO_SOURCE_URL이 fallback으로 동작
+        # 2.5. Spring Boot에서 AI 대상 CCTV URL 동적 적용
+        try:
+            import httpx as _httpx
+            async with _httpx.AsyncClient(timeout=5.0) as _c:
+                _resp = await _c.get(f"{settings.BACKEND_URL}/api/cctv/ai-target")
+                _data = _resp.json()
+                if _data.get("success") and _data.get("data", {}).get("url"):
+                    _url = _data["data"]["url"]
+                    vision_engine.rtsp_url = _url
+                    logger.info(f"[AI-Target] CCTV URL (Spring Boot): {_url}")
+                else:
+                    logger.warning("[AI-Target] 응답 파싱 실패 — fallback URL 사용")
+        except Exception as _e:
+            logger.warning(f"[AI-Target] Spring Boot 미연결 — fallback URL 사용: {_e}")
+
         # 3. 비전 엔진 프로세스 시작 (Process A, B 가동)
         vision_engine.start()
         
