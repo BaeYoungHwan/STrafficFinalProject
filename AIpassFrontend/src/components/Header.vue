@@ -35,7 +35,7 @@ const handleLogout = async () => {
   align-items: center;
   justify-content: space-between;
   padding: 0 40px;
-  height: 72px;
+  height: 50px;
   background: #FFFFFF;
 }
 
@@ -49,12 +49,12 @@ const handleLogout = async () => {
 
 .logo-icon {
   color: #1A6DCC;
-  width: 36px;
-  height: 36px;
+  width: 24px;
+  height: 24px;
 }
 
 .logo-text {
-  font-size: 32px;
+  font-size: 22px;
   font-weight: 800;
   color: #1A1A2E;
 }
@@ -68,11 +68,11 @@ const handleLogout = async () => {
 .btn-logout {
   background: none;
   border: none;
-  color: #6B7280;
-  font-size: 15px;
+  color: #000000;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
-  padding: 8px 16px;
+  padding: 8px 12px;
   letter-spacing: 0.5px;
 }
 
@@ -84,9 +84,9 @@ const handleLogout = async () => {
   background: #1A6DCC;
   color: #ffffff;
   border: none;
-  border-radius: 8px;
-  padding: 10px 28px;
-  font-size: 15px;
+  border-radius: 10px;
+  padding: 10px 22px;
+  font-size: 14px;
   font-weight: 700;
   cursor: pointer;
   text-decoration: none;
