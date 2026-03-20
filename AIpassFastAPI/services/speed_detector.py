@@ -10,8 +10,9 @@ from core.config import settings as _cfg
 
 logger = logging.getLogger(__name__)
 
-vehicle_history = {} 
-SPEED_LIMIT_KMH = 50.0 
+vehicle_history = {}
+SPEED_LIMIT_KMH = 50.0
+MAX_PLAUSIBLE_SPEED_KMH = 100.0  # 물리적 상한선: 이 값 초과 시 노이즈로 간주하여 버림
 EMA_ALPHA = 0.3  # 지수이동평균 가중치
 
 # 가상의 강화대교 호모그래피 매트릭스
@@ -48,10 +49,15 @@ def update_and_get_speed(track_id: int, center_x: float, y_max: float, current_t
 
     distance_m = get_real_world_distance(prev_pt, latest_pt)
     raw_speed_kmh = (distance_m / time_diff) * 3.6
-    
+
+    # 스케일 적용 후 상한선 초과 시 노이즈로 판단하여 이전 EMA 유지
+    scaled_raw = raw_speed_kmh * _cfg.SPEED_SCALE_FACTOR
+    if scaled_raw > MAX_PLAUSIBLE_SPEED_KMH:
+        return round(vehicle_history[track_id]['ema_speed'] * _cfg.SPEED_SCALE_FACTOR, 1)
+
     prev_ema = vehicle_history[track_id]['ema_speed']
     smoothed_speed = raw_speed_kmh if prev_ema == 0.0 else (EMA_ALPHA * raw_speed_kmh) + ((1 - EMA_ALPHA) * prev_ema)
-        
+
     vehicle_history[track_id]['ema_speed'] = smoothed_speed  # raw 저장 (scale 미적용)
     return round(smoothed_speed * _cfg.SPEED_SCALE_FACTOR, 1)
 
