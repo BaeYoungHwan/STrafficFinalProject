@@ -18,9 +18,9 @@ CONSECUTIVE_OVER_THRESHOLD = 5  # N프레임 연속 과속 시에만 신고 (순
 
 # 강화대교 카메라 전용 호모그래피 (640x480 실제 화면 분석 기반)
 # src_pts: 영상 내 도로 4개 꼭짓점 (픽셀)
-# dst_pts: 실제 도로 좌표 (미터) — 강화대교 4차선 폭 약 16m, 구간 약 30m 추정
+# dst_pts: 실제 도로 좌표 (미터) — 강화대교 4차선 폭 약 16m, 구간 실측 55m
 src_pts = np.array([[285, 460], [615, 460], [560, 300], [445, 300]], dtype=np.float32)
-dst_pts = np.array([[0, 0], [16, 0], [16, 30], [0, 30]], dtype=np.float32)
+dst_pts = np.array([[0, 0], [20, 0], [20, 55], [0, 55]], dtype=np.float32)
 HOMOGRAPHY_MATRIX = cv2.getPerspectiveTransform(src_pts, dst_pts)
 
 # 역방향(서울↑) 전용 호모그래피 — y=240-300 영역 (추정값, 실측 후 보정 필요)

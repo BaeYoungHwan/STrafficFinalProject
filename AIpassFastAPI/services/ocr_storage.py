@@ -24,7 +24,9 @@ NUMBERPLATE_DIR = "data/numberplate"
 os.makedirs(NUMBERPLATE_DIR, exist_ok=True)
 
 logger.info("Initializing PaddleOCR model (Korean)...")
-ocr_model = PaddleOCR(lang='korean', use_angle_cls=False)
+# Windows oneDNN 미구현 오류 방지
+os.environ.setdefault("FLAGS_use_mkldnn", "0")
+ocr_model = PaddleOCR(lang='korean', use_angle_cls=False, enable_mkldnn=False)
 
 
 async def save_plate_image(frame: np.ndarray, plate_text: str, violation_type: str) -> str:
@@ -103,8 +105,8 @@ async def extract_license_plate(frame: np.ndarray) -> str:
 
 async def run_ocr_on_file(src_path: str) -> dict:
     """
-    data/carnumber/ 이미지 파일을 읽어 OCR 실행.
-    기존 extract_license_plate, save_plate_image 함수를 재사용.
+    data/carnumber/ 이미지에서 PaddleOCR 감지 박스로 번호판 위치를 찾아
+    해당 영역만 크롭 후 data/numberplate/에 저장한다.
 
     반환:
         plate_number: OCR 결과 (실패 시 "UNRECOGNIZED_{uuid[:8]}")
@@ -117,26 +119,70 @@ async def run_ocr_on_file(src_path: str) -> dict:
         logger.warning(f"[OCR] 이미지 읽기 실패: {src_path}")
         return {"plate_number": f"UNRECOGNIZED_{uid}", "image_url": None, "is_corrected": False}
 
-    # 번호판 영역 크롭 (차량 이미지 하단 중앙)
-    h, w = frame.shape[:2]
-    crop_x1, crop_x2 = int(w * 0.20), int(w * 0.80)
-    crop_y1, crop_y2 = int(h * 0.55), int(h * 0.90)
-    plate_crop = frame[crop_y1:crop_y2, crop_x1:crop_x2]
-    if plate_crop.size == 0:
-        plate_crop = frame  # 크롭 실패 시 전체 이미지 사용
-        logger.warning(f"[OCR] 번호판 크롭 실패, 전체 이미지 사용: {src_path}")
+    def _detect_plate_bbox():
+        """전체 이미지에 OCR 실행 → 번호판 패턴 매칭 박스 좌표 반환"""
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        kernel = np.ones((2, 2), np.uint8)
+        thresh = cv2.dilate(thresh, kernel, iterations=1)
+        thresh_3ch = cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGR)
 
-    plate_text_raw = await extract_license_plate(plate_crop)
+        result = ocr_model.ocr(thresh_3ch)
+        if not result or not result[0]:
+            return None, "UNRECOGNIZED", False
 
-    is_corrected = False
+        best_bbox = None
+        best_text = None
+        best_conf = 0.0
+        fallback_texts = []
+        fallback_conf_sum = 0.0
+
+        for line in result[0]:
+            if not line or len(line) < 2 or not isinstance(line[1], (list, tuple)) or len(line[1]) < 2:
+                continue
+            bbox = line[0]   # [[x1,y1],[x2,y1],[x2,y2],[x1,y2]]
+            text = line[1][0]
+            conf = line[1][1]
+            cleaned = re.sub(r'[^0-9가-힣]', '', text)
+            fallback_texts.append(cleaned)
+            fallback_conf_sum += conf
+
+            if PLATE_PATTERN.match(cleaned) and conf > best_conf:
+                best_bbox = bbox
+                best_text = cleaned
+                best_conf = conf
+
+        if best_bbox is not None:
+            xs = [p[0] for p in best_bbox]
+            ys = [p[1] for p in best_bbox]
+            pad = 8
+            x1 = max(0, int(min(xs)) - pad)
+            y1 = max(0, int(min(ys)) - pad)
+            x2 = min(frame.shape[1], int(max(xs)) + pad)
+            y2 = min(frame.shape[0], int(max(ys)) + pad)
+            plate_crop = frame[y1:y2, x1:x2]
+            is_corrected = best_conf < CONFIDENCE_THRESHOLD
+            logger.info(f"[OCR] 번호판 감지: {best_text} (conf={best_conf:.3f}, box={x1},{y1}-{x2},{y2})")
+            return plate_crop, best_text, is_corrected
+
+        # 패턴 매칭 실패 — 전체 텍스트 합쳐서 MANUAL_REVIEW 반환
+        avg_conf = fallback_conf_sum / len(result[0])
+        combined = "".join(fallback_texts)
+        logger.warning(f"[OCR] 번호판 패턴 미감지 — 원본: {combined} (conf={avg_conf:.3f})")
+        if avg_conf >= CONFIDENCE_THRESHOLD:
+            return None, f"MANUAL_REVIEW_REQUIRED:{combined}", True
+        return None, "UNRECOGNIZED", False
+
+    plate_crop, plate_text_raw, is_corrected = await asyncio.to_thread(_detect_plate_bbox)
+
     if plate_text_raw.startswith("MANUAL_REVIEW_REQUIRED:"):
         plate_text = plate_text_raw.split(":", 1)[1]
         is_corrected = True
     else:
         plate_text = plate_text_raw
 
-    # 크롭된 번호판 이미지를 numberplate에 저장
-    image_url = await save_plate_image(plate_crop, plate_text, "SPEEDING")
+    save_frame = plate_crop if plate_crop is not None else frame
+    image_url = await save_plate_image(save_frame, plate_text, "SPEEDING")
     return {"plate_number": plate_text, "image_url": image_url, "is_corrected": is_corrected}
 
 

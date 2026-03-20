@@ -379,6 +379,8 @@ onMounted(fetchList)
   padding: 24px;
   max-width: 1400px;
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+  background: #FFFFFF;
+  min-height: 100%;
 }
 
 /* 실시간 과속 확인 배너 */
@@ -452,7 +454,7 @@ onMounted(fetchList)
   background: #fff;
   border-radius: 16px;
   padding: 18px 20px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 4px 16px rgba(0, 0, 0, 0.10), 0 8px 24px rgba(0, 0, 0, 0.05);
   margin-bottom: 18px;
   border: 1px solid rgba(226, 232, 240, 0.6);
 }
@@ -549,7 +551,7 @@ onMounted(fetchList)
   min-width: 0;
   background: #fff;
   border-radius: 16px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 4px 16px rgba(0, 0, 0, 0.10), 0 8px 24px rgba(0, 0, 0, 0.05);
   overflow: hidden;
   border: 1px solid rgba(226, 232, 240, 0.6);
 }
@@ -679,7 +681,7 @@ tbody tr.selected {
   flex-shrink: 0;
   background: #fff;
   border-radius: 16px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 4px 16px rgba(0, 0, 0, 0.10), 0 8px 24px rgba(0, 0, 0, 0.05);
   padding: 20px;
   display: flex;
   flex-direction: column;
