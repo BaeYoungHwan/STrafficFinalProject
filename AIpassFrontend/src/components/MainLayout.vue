@@ -36,8 +36,8 @@ import Footer from './Footer.vue'
 }
 
 .side-panel {
-  width: 120px;
-  min-width: 120px;
+  width: 0px;
+  min-width: 0px;
   background: #FFFFFF;
 }
 
