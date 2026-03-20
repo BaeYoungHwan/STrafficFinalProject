@@ -14,4 +14,5 @@ public interface ViolationMapper {
     ViolationDTO findById(Long id);
     void insert(ViolationDTO dto);
     void updateStatus(@Param("id") Long id, @Param("status") String status);
+    void update(ViolationDTO dto);
 }

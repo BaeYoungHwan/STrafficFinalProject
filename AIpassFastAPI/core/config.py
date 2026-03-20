@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     CONF_THRESHOLD: float = 0.3
     TARGET_CLASSES: list = [2, 3, 5, 7] # 승용차, 이륜차, 버스, 화물차
     CAMERA_ID: str = "CAM_INTERSECTION_MAIN"
-    SPEED_SCALE_FACTOR: float = 1.4  # 호모그래피 스케일 보정 (.env에서 덮어쓰기 가능)
+    SPEED_SCALE_FACTOR: float = 1.0  # 호모그래피 스케일 보정 (.env에서 덮어쓰기 가능)
     
     # [V2 추가] 동영상 소스 URL (.env의 VIDEO_SOURCE_URL로 덮어쓰기 가능)
     # 지원 형식: 로컬 파일 (C:/path/video.mp4), RTSP (rtsp://...), HTTP (http://...)

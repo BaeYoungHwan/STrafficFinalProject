@@ -340,6 +340,158 @@ CREATE TABLE maintenance_log (
 =============================================================================
 */
 
+
+CREATE TABLE weather_log (
+    weather_id         BIGSERIAL    PRIMARY KEY,
+    intersection_id    BIGINT       NOT NULL,
+    temperature        DECIMAL(5,2),
+    humidity           INT,
+    wind_speed         DECIMAL(5,2),
+    wind_direction     VARCHAR(10),
+    precipitation      DECIMAL(5,2),
+    precipitation_type VARCHAR(20),
+    sky_condition      VARCHAR(20),
+    visibility         INT,
+    nx                 INT,
+    ny                 INT,
+    forecast_time      TIMESTAMP,
+    collected_at       TIMESTAMP    NOT NULL,
+    created_at         TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (intersection_id) REFERENCES intersection(intersection_id),
+    CONSTRAINT uq_weather_intersection_forecast
+        UNIQUE (intersection_id, forecast_time)
+);
+
+/*
+최종 DDL (확정본)
+
+-- =========================================================================
+-- weather_log — 기상청 초단기실황 수집 이력
+--
+-- 수집 주기: 1시간 1회 (매시 05분 실행, 1시간 전 정시 데이터 요청)
+-- 수집 기준: intersection 테이블의 교차로 좌표 → 기상청 격자(nx, ny) 변환
+-- API: 기상청 초단기실황조회 (getUltraSrtNcst)
+--
+-- 활용처:
+--   1) 예지보전 ML 모델 — temperature를 ambient_temp 입력값으로 사용
+--   2) 대시보드 날씨 위젯 — 최신 1건 조회
+--   3) 교통 혼잡도 분석 — 기상 조건별 혼잡도 상관관계
+--
+-- 중복 방지:
+--   UNIQUE (intersection_id, forecast_time) + INSERT ON CONFLICT DO NOTHING
+--   affected row count로 실제 저장 건수만 카운트
+--
+-- feels_like 컬럼 미포함 사유:
+--   초단기실황 API에 체감온도 카테고리 없음 (항상 NULL)
+--   필요 시 서비스 레이어에서 계산식으로 도출
+-- =========================================================================
+
+CREATE TABLE weather_log (
+    weather_id         BIGSERIAL    PRIMARY KEY,
+
+    -- 교차로 기준 수집 (intersection FK)
+    intersection_id    BIGINT       NOT NULL,
+
+    -- 기상 데이터 (API 카테고리 코드 → 변환 후 저장)
+    temperature        DECIMAL(5,2),                   -- T1H: 기온 (°C) → ML ambient_temp
+    humidity           INT,                            -- REH: 습도 (%)
+    wind_speed         DECIMAL(5,2),                   -- WSD: 풍속 (m/s)
+    wind_direction     VARCHAR(10),                    -- VEC → 16방위 변환 (N/NNE/NE/...)
+    precipitation      DECIMAL(5,2),                   -- RN1: 1시간 강수량 (mm), "강수없음"/"0" → 0.00
+    precipitation_type VARCHAR(20),                    -- PTY → NONE / RAIN / SNOW / SLEET
+    sky_condition      VARCHAR(20),                    -- SKY → CLEAR / CLOUDY / OVERCAST
+    visibility         INT,                            -- VIS × 10: 시정 (m), 음수 → NULL 처리
+
+    -- 기상청 격자 좌표 (위경도 → Lambert Conformal Conic 변환)
+    nx                 INT,
+    ny                 INT,
+
+    -- 시간 필드
+    forecast_time      TIMESTAMP    NOT NULL,          -- API 응답의 baseDate+baseTime (발표 기준 시각)
+    collected_at       TIMESTAMP    NOT NULL,          -- 실제 수집 시각 (LocalDateTime.now())
+    created_at         TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+
+    -- 제약 조건
+    FOREIGN KEY (intersection_id) REFERENCES intersection(intersection_id),
+    CONSTRAINT uq_weather_intersection_forecast
+        UNIQUE (intersection_id, forecast_time)
+        -- 같은 교차로 + 같은 발표 시각 중복 INSERT 방지
+        -- 코드: ON CONFLICT (intersection_id, forecast_time) DO NOTHING
+);
+
+-- 시계열 조회 인덱스 (대시보드 차트, ML 피처 조인용)
+-- intersection_id가 선두 컬럼 → FK 조회도 커버 (별도 FK 인덱스 불필요)
+CREATE INDEX idx_weather_log_intersection_time
+    ON weather_log (intersection_id, collected_at DESC);
+
+-- 전체 시간순 조회 (운영 모니터링, 일괄 조회용)
+CREATE INDEX idx_weather_log_collected_at
+    ON weather_log (collected_at DESC);
+
+COMMENT ON TABLE  weather_log                      IS '기상청 초단기실황 1시간 주기 수집 이력';
+COMMENT ON COLUMN weather_log.temperature          IS '기온(°C) — 예지보전 ML 모델 ambient_temp 입력값';
+COMMENT ON COLUMN weather_log.precipitation_type   IS 'NONE: 없음 / RAIN: 비 / SNOW: 눈 / SLEET: 진눈깨비';
+COMMENT ON COLUMN weather_log.sky_condition        IS 'CLEAR: 맑음 / CLOUDY: 구름많음 / OVERCAST: 흐림';
+COMMENT ON COLUMN weather_log.visibility           IS '시정(m) — 100 이하: 짙은 안개, 교통 위험 알림용';
+COMMENT ON COLUMN weather_log.nx                   IS '기상청 격자 X — 위경도→격자 변환 후 저장';
+COMMENT ON COLUMN weather_log.ny                   IS '기상청 격자 Y — 위경도→격자 변환 후 저장';
+COMMENT ON COLUMN weather_log.forecast_time        IS '기상청 발표 기준 시각 — API 응답 baseDate+baseTime';
+COMMENT ON COLUMN weather_log.collected_at         IS '실제 수집 시각 — 스케줄러/수동 트리거 실행 시점';
+
+
+-- =========================================================================
+-- its_collect_log — 스케줄러 수집 실행 이력
+--
+-- 용도: 스케줄러(WEATHER/CCTV_INFO/TRAFFIC_FLOW)의 실행 결과 기록
+-- 활용처: 운영 모니터링, 장애 추적, 수집 통계
+--
+-- collect_type 값:
+--   WEATHER      — 기상청 날씨 수집 (1시간)
+--   CCTV_INFO    — ITS CCTV 정보 수집 (1시간)
+--   TRAFFIC_FLOW — ITS 교통소통정보 수집 (5분)
+--
+-- total_count vs new_count:
+--   total_count = 수집 시도 건수
+--   new_count   = 실제 DB 저장 건수 (ON CONFLICT 시 차이 발생)
+--   현재 코드에서는 affected row 기반으로 동일값 사용
+-- =========================================================================
+
+CREATE TABLE its_collect_log (
+    log_id        BIGSERIAL    PRIMARY KEY,
+
+    -- 수집 유형 및 결과
+    collect_type  VARCHAR(20)  NOT NULL,               -- WEATHER / CCTV_INFO / TRAFFIC_FLOW
+    status        VARCHAR(20)  NOT NULL,               -- SUCCESS / FAIL
+    total_count   INT          DEFAULT 0,              -- 수집 시도 건수
+    new_count     INT          DEFAULT 0,              -- 실제 저장 건수
+    error_message TEXT,                                -- 실패 시 예외 메시지
+
+    -- 실행 시각 (DB DEFAULT — 코드에서 별도 세팅 불필요)
+    executed_at   TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+);
+
+COMMENT ON TABLE  its_collect_log               IS '스케줄러 수집 실행 이력 — 운영 모니터링용';
+COMMENT ON COLUMN its_collect_log.collect_type  IS 'WEATHER / CCTV_INFO / TRAFFIC_FLOW';
+COMMENT ON COLUMN its_collect_log.status        IS 'SUCCESS: 정상 / FAIL: 실패';
+COMMENT ON COLUMN its_collect_log.total_count   IS '수집 시도 건수';
+COMMENT ON COLUMN its_collect_log.new_count     IS '실제 DB 저장 건수 (중복 제외)';
+COMMENT ON COLUMN its_collect_log.error_message IS '실패 시 예외 메시지 전문';
+COMMENT ON COLUMN its_collect_log.executed_at   IS '스케줄러 실행 시각';
+선행 확인 사항
+이 DDL을 실행하기 전에 아래 2가지가 DB에 존재해야 합니다.
+
+1. intersection 테이블
+weather_log의 FK 대상입니다. 최소한 아래 컬럼이 필요합니다:
+
+
+-- 이미 존재하는 테이블 — 아래 컬럼 확인만 필요
+-- intersection_id  BIGINT PRIMARY KEY
+-- latitude         DECIMAL(10,7)   ← 격자 변환에 사용
+-- longitude        DECIMAL(10,7)   ← 격자 변환에 사용
+2. its_collect_log 중복 생성 주의
+ITS 교통소통 파트에서 먼저 이 테이블을 만들었다면 CREATE 중복 에러가 납니다. 그 경우 CREATE TABLE IF NOT EXISTS로 변경하거나, 이미 있는 테이블을 그대로 사용하면 됩니다.
+*/
   ALTER TABLE violation_log       
   ADD COLUMN IF NOT EXISTS event_id  VARCHAR(100) UNIQUE,
   ADD COLUMN IF NOT EXISTS speed_kmh DECIMAL(5,1);     
@@ -347,6 +499,54 @@ CREATE TABLE maintenance_log (
 
   ALTER TABLE violation_log ALTER COLUMN intersection_id DROP NOT NULL; 
 
+  INSERT INTO member (login_id, password, name, email, created_at)                                                                                                                                       
+  VALUES (                                                                                                                                                                                                    
+	 'admin',                                                                                                                                                                                           
+      '$2b$10$lLkoMv7mHMskNF64/0mP0.nIGSnJKlsZurgcwTiBz2y5qCOyMmEl2',                                                                                                                                    
+      '관리자',                                                                                                                                                                                          
+      'admin@aipass.com',                                                                                                                                                                                
+      NOW()                    );   
 
-  
+
+
+-----------------------------------------------------------------------
+
+  SELECT column_name, data_type, is_nullable                                                                                                                                                             
+  FROM information_schema.columns
+  WHERE table_name = 'member'                                                                                                                                                                            
+  ORDER BY ordinal_position;      
+
+ UPDATE member                                                                                                                                                                                          
+  SET password = 'Qwer123$'                                                                                                                                                       
+  WHERE login_id = 'admin';   
 	
+
+  select * from member;
+
+-- =========================================================================
+-- violation_log 번호판 이미지 경로 컬럼 추가
+-- image_url: OCR 후 크롭된 번호판 이미지 상대경로 (예: numberplate/12가3456.jpg)
+-- =========================================================================
+ALTER TABLE violation_log
+  ADD COLUMN IF NOT EXISTS image_url VARCHAR(255);
+
+
+-- =========================================================================
+-- [최종 확정] violation_log 컬럼 보강 — 안전 적용 (IF NOT EXISTS)
+-- 과속 감지 파이프라인에 필요한 모든 컬럼을 일괄 추가한다.
+-- 실 DB에 이미 적용됐다면 IF NOT EXISTS로 무시되므로 재실행 안전.
+-- =========================================================================
+ALTER TABLE violation_log
+  ADD COLUMN IF NOT EXISTS fine_status  VARCHAR(20) DEFAULT 'UNPROCESSED',
+  ADD COLUMN IF NOT EXISTS is_corrected BOOLEAN     DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS event_id     VARCHAR(100),
+  ADD COLUMN IF NOT EXISTS speed_kmh    NUMERIC(5,1),
+  ADD COLUMN IF NOT EXISTS image_url    VARCHAR(255);
+
+-- event_id UNIQUE 인덱스 (중복 단속 이벤트 방지 — ON CONFLICT DO NOTHING 전제)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_violation_event_id
+    ON violation_log (event_id)
+    WHERE event_id IS NOT NULL;
+
+-- intersection_id NOT NULL 해제 (FastAPI webhook은 교차로 ID 미제공)
+ALTER TABLE violation_log ALTER COLUMN intersection_id DROP NOT NULL;

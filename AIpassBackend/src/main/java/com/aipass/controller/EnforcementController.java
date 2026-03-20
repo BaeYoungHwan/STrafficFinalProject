@@ -2,6 +2,8 @@ package com.aipass.controller;
 
 import com.aipass.dao.ViolationMapper;
 import com.aipass.dto.ViolationDTO;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -12,6 +14,8 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/enforcement")
 public class EnforcementController {
+
+    private static final Logger logger = LoggerFactory.getLogger(EnforcementController.class);
 
     private final ViolationMapper violationMapper;
 
@@ -29,17 +33,9 @@ public class EnforcementController {
             dto.setEventId((String) body.get("eventId"));
             dto.setIntersectionId(null); // FastAPI는 intersection_id 미제공
 
-            // mockLprData에서 번호판 정보 추출
-            Object lprRaw = body.get("mockLprData");
-            if (lprRaw instanceof Map) {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> lpr = (Map<String, Object>) lprRaw;
-                dto.setPlateNumber((String) lpr.getOrDefault("plateNumber", "미인식"));
-                // base64 이미지는 image_url에 저장하지 않음 (URL 타입이므로 null 처리)
-                dto.setImageUrl(null);
-            } else {
-                dto.setPlateNumber("미인식");
-            }
+            // FastAPI에서 top-level로 전달되는 번호판 정보 추출
+            dto.setPlateNumber((String) body.getOrDefault("plateNumber", "미인식"));
+            dto.setImageUrl((String) body.get("imageUrl"));
 
             dto.setViolationType(translateViolationType((String) body.get("violationType")));
 
@@ -119,6 +115,31 @@ public class EnforcementController {
         }
         violationMapper.updateStatus(id, dbStatus);
         return ResponseEntity.ok(Map.of("success", true, "message", "상태가 변경되었습니다."));
+    }
+
+    /**
+     * 단속 내역 수정: 차량번호, 위반유형, 상태 변경 + is_corrected=true
+     */
+    @PutMapping("/violations/{id}")
+    public ResponseEntity<?> updateViolation(@PathVariable Long id, @RequestBody Map<String, String> body) {
+        ViolationDTO existing = violationMapper.findById(id);
+        if (existing == null) {
+            return ResponseEntity.status(404).body(Map.of("success", false, "message", "해당 단속 내역을 찾을 수 없습니다."));
+        }
+        ViolationDTO dto = new ViolationDTO();
+        dto.setViolationId(id);
+        dto.setPlateNumber(body.getOrDefault("plateNumber", existing.getPlateNumber()));
+        dto.setViolationType(body.getOrDefault("violationType", existing.getViolationType()));
+        String korStatus = body.get("status");
+        String dbStatus = toDbStatus(korStatus);
+        dto.setFineStatus(dbStatus != null ? dbStatus : existing.getFineStatus());
+        try {
+            violationMapper.update(dto);
+            return ResponseEntity.ok(Map.of("success", true, "message", "수정이 완료되었습니다."));
+        } catch (Exception e) {
+            logger.error("[updateViolation] DB 업데이트 실패 id={}: {}", id, e.getMessage(), e);
+            return ResponseEntity.status(500).body(Map.of("success", false, "message", "수정 중 오류: " + e.getMessage()));
+        }
     }
 
     // 위반유형 영문 → 한국어
