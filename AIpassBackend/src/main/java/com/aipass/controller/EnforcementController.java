@@ -33,17 +33,9 @@ public class EnforcementController {
             dto.setEventId((String) body.get("eventId"));
             dto.setIntersectionId(null); // FastAPI는 intersection_id 미제공
 
-            // mockLprData에서 번호판 정보 추출
-            Object lprRaw = body.get("mockLprData");
-            if (lprRaw instanceof Map) {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> lpr = (Map<String, Object>) lprRaw;
-                dto.setPlateNumber((String) lpr.getOrDefault("plateNumber", "미인식"));
-                // base64 이미지는 image_url에 저장하지 않음 (URL 타입이므로 null 처리)
-                dto.setImageUrl(null);
-            } else {
-                dto.setPlateNumber("미인식");
-            }
+            // FastAPI에서 top-level로 전달되는 번호판 정보 추출
+            dto.setPlateNumber((String) body.getOrDefault("plateNumber", "미인식"));
+            dto.setImageUrl((String) body.get("imageUrl"));
 
             dto.setViolationType(translateViolationType((String) body.get("violationType")));
 

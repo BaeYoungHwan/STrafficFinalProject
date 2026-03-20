@@ -123,8 +123,9 @@
         <div class="image-wrap">
           <img
             v-if="selectedItem.imageUrl"
-            :src="selectedItem.imageUrl"
+            :src="'http://localhost:8000/images/' + selectedItem.imageUrl"
             alt="차량 이미지"
+            @error="$event.target.style.display='none'; $event.target.nextElementSibling.style.display='flex'"
           />
           <div v-else class="no-image">이미지 없음</div>
         </div>

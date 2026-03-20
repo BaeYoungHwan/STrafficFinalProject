@@ -37,6 +37,11 @@ async def lifespan(app: FastAPI):
     try:
         logger.info(f"Starting {settings.PROJECT_NAME} v{settings.VERSION}")
         
+        # 0. 필수 데이터 디렉토리 생성
+        os.makedirs("data/numberplate", exist_ok=True)
+        os.makedirs("data/carnumber", exist_ok=True)
+        logger.info("[Init] Data directories ensured.")
+
         # 1. 하드웨어 점검
         check_hardware_acceleration()
         
