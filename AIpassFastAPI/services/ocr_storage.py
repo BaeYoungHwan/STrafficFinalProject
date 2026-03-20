@@ -117,7 +117,16 @@ async def run_ocr_on_file(src_path: str) -> dict:
         logger.warning(f"[OCR] 이미지 읽기 실패: {src_path}")
         return {"plate_number": f"UNRECOGNIZED_{uid}", "image_url": None, "is_corrected": False}
 
-    plate_text_raw = await extract_license_plate(frame)
+    # 번호판 영역 크롭 (차량 이미지 하단 중앙)
+    h, w = frame.shape[:2]
+    crop_x1, crop_x2 = int(w * 0.20), int(w * 0.80)
+    crop_y1, crop_y2 = int(h * 0.55), int(h * 0.90)
+    plate_crop = frame[crop_y1:crop_y2, crop_x1:crop_x2]
+    if plate_crop.size == 0:
+        plate_crop = frame  # 크롭 실패 시 전체 이미지 사용
+        logger.warning(f"[OCR] 번호판 크롭 실패, 전체 이미지 사용: {src_path}")
+
+    plate_text_raw = await extract_license_plate(plate_crop)
 
     is_corrected = False
     if plate_text_raw.startswith("MANUAL_REVIEW_REQUIRED:"):
@@ -126,7 +135,8 @@ async def run_ocr_on_file(src_path: str) -> dict:
     else:
         plate_text = plate_text_raw
 
-    image_url = await save_plate_image(frame, plate_text, "SPEEDING")
+    # 크롭된 번호판 이미지를 numberplate에 저장
+    image_url = await save_plate_image(plate_crop, plate_text, "SPEEDING")
     return {"plate_number": plate_text, "image_url": image_url, "is_corrected": is_corrected}
 
 
