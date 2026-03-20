@@ -18,8 +18,10 @@ from utils.http_client import http_client
 
 logger = logging.getLogger(__name__)
 
-INTERSECTION_ROI = np.array([[200, 300], [1000, 300], [1200, 700], [50, 700]], np.int32)
-VIOLATION_LINE_Y = 600
+# 강화대교 카메라 전용 좌표 (640x480 기준, 실제 화면 분석으로 보정)
+INTERSECTION_ROI = np.array([[285, 480], [615, 480], [560, 230], [445, 230]], np.int32)
+VIOLATION_LINE_Y = 360          # 정방향(강화↓) 단속선 — y 증가 방향
+VIOLATION_LINE_Y_REVERSE = 240  # 역방향(서울↑) 단속선 — y 감소 방향
 
 # carnumber 이미지 목록 캐시 (Process B에서 1회 로드)
 _CARNUMBER_IMAGES: list = []
@@ -157,14 +159,27 @@ def ai_inference_worker(meta_queue: Queue, event_queue: Queue, mjpeg_queue: Queu
                 if is_inside_roi and track_id not in active_tracks:
                     safe_put({"type": "ENTER_ROI", "track_id": track_id})
 
-                # Flow B (단속선 통과)
-                if y_center > VIOLATION_LINE_Y and track_id not in active_tracks:
-                    x1 = max(0, int(x_center - width/2))
-                    y1 = max(0, int(y_center))
-                    x2 = min(frame.shape[1], int(x_center + width/2))
-                    y2 = min(frame.shape[0], int(y_center + height/2))
+                # Flow B (단속선 통과 — 정방향/역방향 모두 감지)
+                # 정방향(강화↓): y_center > VIOLATION_LINE_Y (y 증가, 카메라 쪽으로 접근)
+                # 역방향(서울↑): y_center < VIOLATION_LINE_Y_REVERSE (y 감소, 카메라에서 멀어짐)
+                is_forward  = y_center > VIOLATION_LINE_Y
+                is_reverse  = y_center < VIOLATION_LINE_Y_REVERSE
 
-                    plate_crop = frame[y1:y2, x1:x2]
+                if (is_forward or is_reverse) and track_id not in active_tracks:
+                    if is_forward:
+                        # 정방향 — 전면 번호판: 차량 하단 1/4
+                        px1 = max(0, int(x_center - width * 0.35))
+                        py1 = max(0, int(y_center + height * 0.15))
+                        px2 = min(frame.shape[1], int(x_center + width * 0.35))
+                        py2 = min(frame.shape[0], int(y_center + height * 0.5))
+                    else:
+                        # 역방향 — 후면 번호판: 차량 상단 1/4
+                        px1 = max(0, int(x_center - width * 0.35))
+                        py1 = max(0, int(y_center - height * 0.5))
+                        px2 = min(frame.shape[1], int(x_center + width * 0.35))
+                        py2 = min(frame.shape[0], int(y_center - height * 0.15))
+
+                    plate_crop = frame[py1:py2, px1:px2]
                     if plate_crop.size > 0:
                         safe_put({
                             "type": "VIOLATION",
@@ -229,8 +244,11 @@ def ai_inference_worker(meta_queue: Queue, event_queue: Queue, mjpeg_queue: Queu
                 cv2.putText(resized_frame, label, (x_px, y_px),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
 
-        cv2.line(resized_frame, (0, int(VIOLATION_LINE_Y * 480/frame.shape[0])),
-                 (640, int(VIOLATION_LINE_Y * 480/frame.shape[0])), (0, 0, 255), 2)
+        # 정방향 단속선 (빨간색) + 역방향 단속선 (파란색)
+        fwd_y = int(VIOLATION_LINE_Y * 480 / frame.shape[0])
+        rev_y = int(VIOLATION_LINE_Y_REVERSE * 480 / frame.shape[0])
+        cv2.line(resized_frame, (0, fwd_y), (640, fwd_y), (0, 0, 255), 2)
+        cv2.line(resized_frame, (0, rev_y), (640, rev_y), (255, 100, 0), 2)
 
         ret, buffer = cv2.imencode('.jpg', resized_frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
         if ret:
@@ -253,7 +271,8 @@ async def _handle_speeding_violation(payload: dict):
         result = await run_ocr_on_file(src_path)
         payload["plateNumber"] = result["plate_number"]
         payload["imageUrl"] = result["image_url"]
-        logger.info(f"[Speeding] OCR 완료 — 번호판: {result['plate_number']} | 이미지: {result['image_url']}")
+        payload["isCorrected"] = result.get("is_corrected", False)
+        logger.info(f"[Speeding] OCR 완료 — 번호판: {result['plate_number']} | 이미지: {result['image_url']} | 수동검토: {result.get('is_corrected', False)}")
     else:
         payload["plateNumber"] = "미인식"
         payload["imageUrl"] = None

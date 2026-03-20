@@ -11,19 +11,30 @@ from core.config import settings as _cfg
 logger = logging.getLogger(__name__)
 
 vehicle_history = {}
-SPEED_LIMIT_KMH = 50.0
+SPEED_LIMIT_KMH = 70.0
 MAX_PLAUSIBLE_SPEED_KMH = 100.0  # 물리적 상한선
 EMA_ALPHA = 0.3
 CONSECUTIVE_OVER_THRESHOLD = 5  # N프레임 연속 과속 시에만 신고 (순간 튐 방지)
 
-# 가상의 강화대교 호모그래피 매트릭스
-src_pts = np.array([[500, 300], [780, 300], [1280, 720], [0, 720]], dtype=np.float32)
-dst_pts = np.array([[0, 0], [10, 0], [10, 30], [0, 30]], dtype=np.float32)
+# 강화대교 카메라 전용 호모그래피 (640x480 실제 화면 분석 기반)
+# src_pts: 영상 내 도로 4개 꼭짓점 (픽셀)
+# dst_pts: 실제 도로 좌표 (미터) — 강화대교 4차선 폭 약 16m, 구간 약 30m 추정
+src_pts = np.array([[285, 460], [615, 460], [560, 300], [445, 300]], dtype=np.float32)
+dst_pts = np.array([[0, 0], [16, 0], [16, 30], [0, 30]], dtype=np.float32)
 HOMOGRAPHY_MATRIX = cv2.getPerspectiveTransform(src_pts, dst_pts)
 
+# 역방향(서울↑) 전용 호모그래피 — y=240-300 영역 (추정값, 실측 후 보정 필요)
+# 강화대교 역방향 차선: 카메라에서 멀어지는 방향, 화면 상단에 위치
+src_pts_rev = np.array([[330, 240], [560, 240], [560, 300], [285, 300]], dtype=np.float32)
+dst_pts_rev = np.array([[0, 0], [16, 0], [16, 20], [0, 20]], dtype=np.float32)
+HOMOGRAPHY_MATRIX_REVERSE = cv2.getPerspectiveTransform(src_pts_rev, dst_pts_rev)
+
 def get_real_world_distance(pt1, pt2):
+    # 평균 y 위치 기준으로 정방향/역방향 호모그래피 자동 선택
+    avg_y = (pt1[1] + pt2[1]) / 2
+    matrix = HOMOGRAPHY_MATRIX_REVERSE if avg_y < 300 else HOMOGRAPHY_MATRIX
     pts = np.array([[pt1], [pt2]], dtype=np.float32)
-    transformed_pts = cv2.perspectiveTransform(pts, HOMOGRAPHY_MATRIX)
+    transformed_pts = cv2.perspectiveTransform(pts, matrix)
     return np.linalg.norm(transformed_pts[0][0] - transformed_pts[1][0])
 
 def update_and_get_speed(track_id: int, center_x: float, y_max: float, current_time: float) -> float:
@@ -56,13 +67,14 @@ def update_and_get_speed(track_id: int, center_x: float, y_max: float, current_t
     max_raw = MAX_PLAUSIBLE_SPEED_KMH / max(_cfg.SPEED_SCALE_FACTOR, 1e-6)
     if raw_speed_kmh > max_raw:
         prev_scaled = vehicle_history[track_id]['ema_speed'] * _cfg.SPEED_SCALE_FACTOR
-        return round(min(prev_scaled, MAX_PLAUSIBLE_SPEED_KMH), 1)
+        return float(round(min(prev_scaled, MAX_PLAUSIBLE_SPEED_KMH), 1))
 
     prev_ema = vehicle_history[track_id]['ema_speed']
     smoothed_speed = raw_speed_kmh if prev_ema == 0.0 else (EMA_ALPHA * raw_speed_kmh) + ((1 - EMA_ALPHA) * prev_ema)
-    vehicle_history[track_id]['ema_speed'] = smoothed_speed
+    # EMA 저장값 자체도 상한선으로 클리핑 — 누적 오버슈트 방지
+    vehicle_history[track_id]['ema_speed'] = min(smoothed_speed, max_raw)
 
-    return round(min(smoothed_speed * _cfg.SPEED_SCALE_FACTOR, MAX_PLAUSIBLE_SPEED_KMH), 1)
+    return float(round(min(smoothed_speed * _cfg.SPEED_SCALE_FACTOR, MAX_PLAUSIBLE_SPEED_KMH), 1))
 
 def garbage_collection(current_time: float):
     stale_ids = [t_id for t_id, data in vehicle_history.items() if current_time - data['last_seen'] > 2.0]
