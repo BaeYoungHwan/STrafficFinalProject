@@ -5,7 +5,6 @@ import logging
 import numpy as np
 from datetime import datetime, timezone
 from collections import deque
-import queue
 from core.config import settings as _cfg
 
 logger = logging.getLogger(__name__)
@@ -67,26 +66,25 @@ def update_and_get_speed(track_id: int, center_x: float, y_max: float, current_t
     max_raw = MAX_PLAUSIBLE_SPEED_KMH / max(_cfg.SPEED_SCALE_FACTOR, 1e-6)
     if raw_speed_kmh > max_raw:
         prev_scaled = vehicle_history[track_id]['ema_speed'] * _cfg.SPEED_SCALE_FACTOR
-        return float(round(min(prev_scaled, MAX_PLAUSIBLE_SPEED_KMH), 1))
+        return round(float(min(prev_scaled, MAX_PLAUSIBLE_SPEED_KMH)), 1)
 
     prev_ema = vehicle_history[track_id]['ema_speed']
     smoothed_speed = raw_speed_kmh if prev_ema == 0.0 else (EMA_ALPHA * raw_speed_kmh) + ((1 - EMA_ALPHA) * prev_ema)
     # EMA 저장값 자체도 상한선으로 클리핑 — 누적 오버슈트 방지
     vehicle_history[track_id]['ema_speed'] = min(smoothed_speed, max_raw)
 
-    return float(round(min(smoothed_speed * _cfg.SPEED_SCALE_FACTOR, MAX_PLAUSIBLE_SPEED_KMH), 1))
+    return round(float(min(smoothed_speed * _cfg.SPEED_SCALE_FACTOR, MAX_PLAUSIBLE_SPEED_KMH)), 1)
 
 def garbage_collection(current_time: float):
     stale_ids = [t_id for t_id, data in vehicle_history.items() if current_time - data['last_seen'] > 2.0]
     for t_id in stale_ids:
         del vehicle_history[t_id]
 
-def process_headless_inference(results, event_queue) -> list:
+def process_headless_inference(results) -> list:
     """[Process B] 과속 감지 워커.
 
     반환: [{"track_id": int, "speed": float, "payload": dict}, ...]
     과속 감지된 차량 목록을 반환. vision.py에서 이미지 선정 후 큐에 적재.
-    event_queue 파라미터는 하위 호환성 유지용 (미사용).
     """
     current_time = time.time()
     garbage_collection(current_time)

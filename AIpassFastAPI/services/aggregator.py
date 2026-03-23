@@ -10,9 +10,9 @@ class CongestionEngine:
     교차로 ROI 진입/이탈 이벤트를 기반으로 혼잡도를 실시간 산출한다.
 
     혼잡도 기준:
-        - 0~5대  : SMOOTH  (원활)
-        - 6~15대 : SLOW    (서행)
-        - 16대+  : CONGESTED (혼잡)
+        0~5대   : SMOOTH   (원활)
+        6~15대  : SLOW     (서행)
+        16대+   : CONGESTED (혼잡)
     """
 
     THRESHOLD_SMOOTH = 5
@@ -24,12 +24,13 @@ class CongestionEngine:
         self._total_exits: int = 0
         self._last_updated: datetime | None = None
 
-    async def record_entry(self, track_id: int):
+    # sync로 변경 — 내부에 await 없음, 불필요한 코루틴 오버헤드 제거
+    def record_entry(self, track_id: int) -> None:
         self._active_vehicles.add(track_id)
         self._total_entries += 1
         self._last_updated = datetime.now(timezone.utc)
 
-    async def record_exit(self, track_id: int):
+    def record_exit(self, track_id: int) -> None:
         self._active_vehicles.discard(track_id)
         self._total_exits += 1
         self._last_updated = datetime.now(timezone.utc)
@@ -54,39 +55,52 @@ class CongestionEngine:
 
 congestion_engine = CongestionEngine()
 
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
 # 스케줄러 진입점 (main.py의 lifespan에서 호출)
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
 
-_periodic_task: asyncio.Task | None = None
+_tasks: list[asyncio.Task] = []
 
 
 async def _periodic_log():
-    """30초마다 혼잡도 상태를 로그에 출력하는 백그라운드 태스크."""
+    """30초마다 혼잡도 상태를 로그에 출력."""
     while True:
         await asyncio.sleep(30)
         status = await congestion_engine.get_status()
         logger.info(
-            "[Aggregator] Congestion status — level: %s, active: %d",
+            "[Aggregator] Congestion — level: %s, active: %d",
             status["congestion_level"],
             status["active_vehicles"],
         )
 
 
+async def _dlq_retry_loop():
+    """5분마다 DLQ(미전송 파일) 재전송 시도."""
+    await asyncio.sleep(60)  # 서버 완전 기동 후 시작
+    while True:
+        try:
+            from services.webhook_client import webhook_client
+            await webhook_client.retry_failed_payloads()
+        except Exception as e:
+            logger.warning("[Aggregator] DLQ retry error: %s", e)
+        await asyncio.sleep(300)
+
+
 def start_aggregators():
-    """main.py lifespan 시작 시 호출. 백그라운드 집계 태스크를 등록한다."""
-    global _periodic_task
-    _periodic_task = asyncio.create_task(_periodic_log())
-    logger.info("[Aggregator] Started congestion monitor.")
+    global _tasks
+    _tasks = [
+        asyncio.create_task(_periodic_log()),
+        asyncio.create_task(_dlq_retry_loop()),
+    ]
+    logger.info("[Aggregator] Started (congestion monitor + DLQ retry).")
 
 
 async def stop_aggregators():
-    """main.py lifespan 종료 시 호출. 태스크를 안전하게 해제한다."""
-    global _periodic_task
-    if _periodic_task:
-        _periodic_task.cancel()
+    for task in _tasks:
+        task.cancel()
         try:
-            await _periodic_task
+            await task
         except asyncio.CancelledError:
             pass
+    _tasks.clear()
     logger.info("[Aggregator] Stopped.")

@@ -1,0 +1,12 @@
+{
+  "name": "aipass",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "AIpassFrontend"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=AIpassFrontend",
+    "build": "npm run build --workspace=AIpassFrontend"
+  }
+}
