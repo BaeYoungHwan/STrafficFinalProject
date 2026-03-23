@@ -131,16 +131,18 @@ def ai_inference_worker(meta_queue: Queue, event_queue: Queue, mjpeg_queue: Queu
 
         # 2프레임에 1회만 YOLO 추론 — 나머지는 이전 결과 재사용으로 CPU 부하 절반 감소
         _infer_counter += 1
+        _is_new_result = True
         if _infer_counter % 2 == 0 and _last_results is not None:
             results = _last_results
+            _is_new_result = False
         else:
             results = model.track(frame, persist=True, tracker="bytetrack.yaml", verbose=False,
                                   imgsz=settings.INFERENCE_IMGSZ, conf=settings.CONF_THRESHOLD,
                                   classes=settings.TARGET_CLASSES)
             _last_results = results
 
-        # [과속 감지] process_headless_inference 호출 → 과속 이벤트 목록 반환
-        speeding_events = process_headless_inference(results)
+        # [과속 감지] 새 추론 결과일 때만 속도 업데이트 — 재사용 프레임은 동일 위치로 speed≈0이 되어 EMA를 왜곡함
+        speeding_events = process_headless_inference(results) if _is_new_result else []
 
         # 과속 감지된 차량에 대해 carnumber 랜덤 이미지 선정 후 이벤트 큐에 적재
         carnumber_images = _get_carnumber_images()
@@ -203,6 +205,8 @@ def ai_inference_worker(meta_queue: Queue, event_queue: Queue, mjpeg_queue: Queu
 async def _handle_speeding_violation(payload: dict):
     """과속 이벤트: carnumber 이미지에 OCR 실행 → webhook 전송"""
     src_path = payload.pop("src_image_path", None)
+    if src_path:
+        payload["srcImageUrl"] = f"carnumber/{os.path.basename(src_path)}"
 
     if src_path and os.path.exists(src_path):
         result = await run_ocr_on_file(src_path)

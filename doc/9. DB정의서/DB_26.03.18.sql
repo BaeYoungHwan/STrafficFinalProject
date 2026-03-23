@@ -521,7 +521,7 @@ ITS 교통소통 파트에서 먼저 이 테이블을 만들었다면 CREATE 중
   WHERE login_id = 'admin';   
 	
 
-  select * from member;
+  select * from violation_log;
 
 -- =========================================================================
 -- violation_log 번호판 이미지 경로 컬럼 추가
@@ -550,3 +550,5 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_violation_event_id
 
 -- intersection_id NOT NULL 해제 (FastAPI webhook은 교차로 ID 미제공)
 ALTER TABLE violation_log ALTER COLUMN intersection_id DROP NOT NULL;
+ALTER TABLE violation_log ADD COLUMN src_image_url VARCHAR(255)
+

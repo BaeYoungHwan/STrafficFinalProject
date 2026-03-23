@@ -2,11 +2,11 @@ package com.aipass.dto;
 
 public class ViolationDTO {
     private Long violationId;
-    private Long intersectionId;
     private String eventId;
     private String plateNumber;
     private String violationType;
     private String imageUrl;
+    private String srcImageUrl;
     private String fineStatus;   // DB: UNPROCESSED / APPROVED / REJECTED
     private Boolean isCorrected;
     private Double speedKmh;
@@ -24,9 +24,6 @@ public class ViolationDTO {
     public Long getViolationId() { return violationId; }
     public void setViolationId(Long violationId) { this.violationId = violationId; }
 
-    public Long getIntersectionId() { return intersectionId; }
-    public void setIntersectionId(Long intersectionId) { this.intersectionId = intersectionId; }
-
     public String getEventId() { return eventId; }
     public void setEventId(String eventId) { this.eventId = eventId; }
 
@@ -38,6 +35,9 @@ public class ViolationDTO {
 
     public String getImageUrl() { return imageUrl; }
     public void setImageUrl(String imageUrl) { this.imageUrl = imageUrl; }
+
+    public String getSrcImageUrl() { return srcImageUrl; }
+    public void setSrcImageUrl(String srcImageUrl) { this.srcImageUrl = srcImageUrl; }
 
     public String getFineStatus() { return fineStatus; }
     public void setFineStatus(String fineStatus) { this.fineStatus = fineStatus; }

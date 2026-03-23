@@ -86,7 +86,7 @@
                 <td>{{ (page - 1) * size + index + 1 }}</td>
                 <td>{{ item.plateNumber }}</td>
                 <td>{{ item.violationType }}</td>
-                <td class="location-cell">{{ item.location }}</td>
+                <td class="location-cell">강화대교</td>
                 <td>
                   <span class="badge" :class="statusClass(item)">{{ statusLabel(item) }}</span>
                 </td>
@@ -119,17 +119,30 @@
           </div>
         </div>
 
-        <!-- 차량 이미지 -->
-        <div class="image-wrap">
-          <img
-            v-if="selectedItem.imageUrl"
-            :src="'http://localhost:8000/images/' + selectedItem.imageUrl"
-            alt="차량 이미지"
-            @error="$event.target.style.display='none'; $event.target.nextElementSibling.style.display='flex'"
-          />
-          <div v-else class="no-image">이미지 없음</div>
+        <!-- 차량 이미지: 전체(16:9) → 번호판 크롭(5:1) 상하 스택 -->
+        <div class="images-stack">
+          <div class="image-main-wrap">
+            <div class="image-box-label">차량 전체</div>
+            <img
+              v-if="selectedItem.srcImageUrl"
+              :src="'http://localhost:8000/images/' + selectedItem.srcImageUrl"
+              alt="차량 전체 사진"
+              @error="$event.target.style.display='none'"
+            />
+            <div v-else class="no-image">이미지 없음</div>
+          </div>
+          <div class="image-plate-wrap">
+            <div class="image-box-label">번호판 크롭</div>
+            <img
+              v-if="selectedItem.imageUrl"
+              :src="'http://localhost:8000/images/' + selectedItem.imageUrl"
+              alt="번호판"
+              @error="$event.target.style.display='none'"
+            />
+            <div v-else class="no-image">이미지 없음</div>
+          </div>
         </div>
-        <div class="ocr-label">번호판 인식 결과 ▶</div>
+
 
         <!-- 상세 정보 테이블 -->
         <table class="detail-table">
@@ -162,7 +175,7 @@
           </tr>
           <tr>
             <th>위치</th>
-            <td>{{ selectedItem.location }}</td>
+            <td>강화대교</td>
           </tr>
           <tr>
             <th>상태</th>
@@ -677,7 +690,7 @@ tbody tr.selected {
 
 /* 상세 패널 */
 .detail-section {
-  width: 340px;
+  width: 380px;
   flex-shrink: 0;
   background: #fff;
   border-radius: 16px;
@@ -723,34 +736,62 @@ tbody tr.selected {
   background: #E2E8F0;
 }
 
-/* 이미지 */
-.image-wrap {
+/* 이미지 상하 스택 */
+.images-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 차량 전체: 16:9 비율 */
+.image-main-wrap {
+  position: relative;
   width: 100%;
-  height: 160px;
+  aspect-ratio: 16 / 9;
   background: #F1F5FB;
-  border-radius: 12px;
+  border-radius: 10px;
   overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-.image-wrap img {
+/* 번호판 크롭: 5:1 비율 (실제 번호판 비율) */
+.image-plate-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 5 / 1;
+  background: #F1F5FB;
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.image-main-wrap img,
+.image-plate-wrap img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
+.image-box-label {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  font-size: 10px;
+  color: #6B7280;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.85);
+  padding: 1px 5px;
+  border-radius: 4px;
+  z-index: 1;
+}
+
 .no-image {
   font-size: 13px;
   color: #9CA3AF;
-}
-
-.ocr-label {
-  font-size: 12px;
-  color: #6B7280;
-  font-weight: 500;
-  margin-top: -6px;
 }
 
 /* 상세 테이블 */

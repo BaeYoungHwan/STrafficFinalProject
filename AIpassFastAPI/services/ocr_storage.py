@@ -13,10 +13,11 @@ from paddleocr import PaddleOCR
 logger = logging.getLogger(__name__)
 
 # OCR 전용 스레드풀: MJPEG 스트림 등 다른 asyncio.to_thread 작업과 분리
-_ocr_executor = concurrent.futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="paddle-ocr")
+# max_workers=2: cpu_threads=2와 조합 시 동시 최대 4코어 사용 → YOLO 코어 확보
+_ocr_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="paddle-ocr")
 
-# 동시 OCR 작업 수 제한 (스레드풀 max_workers와 일치, config.OCR_MAX_CONCURRENT_TASKS=3)
-ocr_semaphore = asyncio.Semaphore(3)
+# 동시 OCR 작업 수 제한 (스레드풀 max_workers와 일치)
+ocr_semaphore = asyncio.Semaphore(2)
 
 # 한국어 번호판 규격 검증용 패턴
 # 일반 번호판: 12가3456, 123가4567
@@ -37,6 +38,7 @@ ocr_model = PaddleOCR(
     enable_mkldnn=False,
     use_doc_orientation_classify=False,
     use_doc_unwarping=False,
+    cpu_threads=2,          # OCR 전용 코어 2개로 제한 → YOLO/MJPEG 코어 경쟁 방지
 )
 
 
@@ -269,7 +271,7 @@ async def save_plate_image(frame: np.ndarray, plate_text: str, violation_type: s
 
     def _write():
         # Windows에서 한글 경로 cv2.imwrite 미지원 → imencode + tofile 사용
-        _, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        _, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
         buf.tofile(save_path)
 
     await asyncio.to_thread(_write)
@@ -359,6 +361,15 @@ async def run_ocr_on_file(src_path: str) -> dict:
         """4단계 전략으로 번호판 bbox 탐지 (1차 크롭된 범퍼 영역 기준)"""
         img_h, img_w = bumper_frame.shape[:2]
 
+        # ── Stage -1: 전체 이미지 OCR ──
+        # bumper 크롭 이전에 전체 frame 탐색 (번호판이 이미지 상단이거나 클로즈업 샷인 경우 대응)
+        bbox_f, text_f, conf_f, _, _ = _ocr_on_image(frame)
+        if bbox_f is not None:
+            crop_f, *_ = _crop_from_bbox(frame, bbox_f, pad=8)
+            if _validate_crop(crop_f):
+                logger.info(f"[OCR Stage-1] 전체이미지 감지: {text_f} (conf={conf_f:.3f})")
+                return crop_f, text_f, conf_f < CONFIDENCE_THRESHOLD
+
         # ── Stage 0: 밝기 기반 번호판 영역 사전 크롭 → 직접 OCR ──
         # 흰색 번호판은 어두운 차체/도로 배경에서 가장 밝은 수평 row
         # bumper_frame 전체 대신 번호판만 타겟팅하여 인식률 대폭 향상
@@ -385,6 +396,20 @@ async def run_ocr_on_file(src_path: str) -> dict:
                 if PLATE_PATTERN.match(_combined0):
                     logger.info(f"[OCR Stage0] 밝기 크롭 직접 인식: {_combined0} (conf={_avg_conf0:.3f})")
                     return _tight_crop, _combined0, _avg_conf0 < CONFIDENCE_THRESHOLD
+                # ── Stage 0b: 이진화 없이 재시도 (한글 획이 이진화로 뭉개진 경우 복원) ──
+                _prep0b = _preprocess_for_ocr(_tight_crop, binarize=False)
+                _result0b = ocr_model.ocr(_prep0b)
+                if _result0b and _result0b[0]:
+                    _texts0b, _confs0b = [], []
+                    for _line0b in _result0b[0]:
+                        if _line0b and len(_line0b) >= 2 and isinstance(_line0b[1], (list, tuple)):
+                            _texts0b.append(re.sub(r'[^0-9가-힣]', '', _line0b[1][0]))
+                            _confs0b.append(_line0b[1][1])
+                    _combined0b = "".join(_texts0b)
+                    _avg_conf0b = sum(_confs0b) / len(_confs0b) if _confs0b else 0.0
+                    if PLATE_PATTERN.match(_combined0b):
+                        logger.info(f"[OCR Stage0b] 비이진화 재시도 인식: {_combined0b} (conf={_avg_conf0b:.3f})")
+                        return _tight_crop, _combined0b, _avg_conf0b < CONFIDENCE_THRESHOLD
                 if _combined0:
                     logger.debug(f"[OCR Stage0] 부분 인식: {_combined0} — Stage1 진행")
 

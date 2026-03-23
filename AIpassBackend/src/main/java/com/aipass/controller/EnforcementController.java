@@ -31,11 +31,11 @@ public class EnforcementController {
         try {
             ViolationDTO dto = new ViolationDTO();
             dto.setEventId((String) body.get("eventId"));
-            dto.setIntersectionId(null); // FastAPI는 intersection_id 미제공
 
             // FastAPI에서 top-level로 전달되는 번호판 정보 추출
             dto.setPlateNumber((String) body.getOrDefault("plateNumber", "미인식"));
             dto.setImageUrl((String) body.get("imageUrl"));
+            dto.setSrcImageUrl((String) body.get("srcImageUrl"));
 
             dto.setViolationType(translateViolationType((String) body.get("violationType")));
 
