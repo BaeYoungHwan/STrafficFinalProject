@@ -1,6 +1,5 @@
 import cv2
 import time
-import uuid
 import logging
 import os
 import random
@@ -8,18 +7,14 @@ import glob as _glob
 import numpy as np
 import queue
 import asyncio
-from datetime import datetime, timezone
 from multiprocessing import Process, Queue, shared_memory, Lock, Event
 from ultralytics import YOLO
 from core.config import settings
 from services.webhook_client import webhook_client
-from services.ocr_storage import process_violation_task, run_ocr_on_file
+from services.ocr_storage import run_ocr_on_file
 from utils.http_client import http_client
 
 logger = logging.getLogger(__name__)
-
-# 강화대교 카메라 전용 좌표 (640x480 기준, 실제 화면 분석으로 보정)
-INTERSECTION_ROI = np.array([[285, 480], [615, 480], [560, 230], [445, 230]], np.int32)
 
 # carnumber 이미지 목록 캐시 (Process B에서 1회 로드)
 _CARNUMBER_IMAGES: list = []
@@ -104,7 +99,6 @@ def ai_inference_worker(meta_queue: Queue, event_queue: Queue, mjpeg_queue: Queu
     """[Process B] 무거운 AI 연산 및 시각화 렌더링 워커"""
     logger.info(f"[AI Engine] Process started. Loading {settings.YOLO_MODEL}...")
     model = YOLO(settings.YOLO_MODEL)
-    active_tracks = set()
 
     from services.speed_detector import (
         process_headless_inference,
@@ -119,6 +113,9 @@ def ai_inference_worker(meta_queue: Queue, event_queue: Queue, mjpeg_queue: Queu
         except queue.Full:
             pass
 
+    _infer_counter = 0
+    _last_results = None
+
     while not stop_event.is_set():
         try:
             meta = meta_queue.get(timeout=1.0)
@@ -132,43 +129,18 @@ def ai_inference_worker(meta_queue: Queue, event_queue: Queue, mjpeg_queue: Queu
         finally:
             existing_shm.close()
 
-        all_classes = settings.TARGET_CLASSES + settings.EMERGENCY_CLASSES
-        results = model.track(frame, persist=True, tracker="bytetrack.yaml", verbose=False,
-                              imgsz=settings.INFERENCE_IMGSZ, conf=settings.CONF_THRESHOLD, classes=all_classes)
-
-        if results[0].boxes and results[0].boxes.id is not None:
-            id_list = results[0].boxes.id.int().cpu().tolist()
-            current_tracks = set(id_list)
-
-            for i, track_id in enumerate(id_list):
-                box = results[0].boxes[i]
-                class_id = int(box.cls[0])
-                class_name = model.names[class_id]
-                conf = float(box.conf[0])
-                x_center, y_center, width, height = box.xywh[0].tolist()
-
-                # Flow C (긴급 차량)
-                if class_id in settings.EMERGENCY_CLASSES and track_id not in active_tracks:
-                    safe_put({"type": "EMERGENCY", "track_id": track_id, "class": class_name, "conf": conf})
-                    continue
-
-                # Flow A (혼잡도 진입)
-                is_inside_roi = cv2.pointPolygonTest(INTERSECTION_ROI, (x_center, y_center), False) >= 0
-                if is_inside_roi and track_id not in active_tracks:
-                    safe_put({"type": "ENTER_ROI", "track_id": track_id})
-
-
-            exited_tracks = active_tracks - current_tracks
-            for t_id in exited_tracks:
-                safe_put({"type": "EXIT_ROI", "track_id": t_id})
-            active_tracks = current_tracks
+        # 2프레임에 1회만 YOLO 추론 — 나머지는 이전 결과 재사용으로 CPU 부하 절반 감소
+        _infer_counter += 1
+        if _infer_counter % 2 == 0 and _last_results is not None:
+            results = _last_results
         else:
-            for t_id in active_tracks:
-                safe_put({"type": "EXIT_ROI", "track_id": t_id})
-            active_tracks.clear()
+            results = model.track(frame, persist=True, tracker="bytetrack.yaml", verbose=False,
+                                  imgsz=settings.INFERENCE_IMGSZ, conf=settings.CONF_THRESHOLD,
+                                  classes=settings.TARGET_CLASSES)
+            _last_results = results
 
         # [과속 감지] process_headless_inference 호출 → 과속 이벤트 목록 반환
-        speeding_events = process_headless_inference(results, event_queue)
+        speeding_events = process_headless_inference(results)
 
         # 과속 감지된 차량에 대해 carnumber 랜덤 이미지 선정 후 이벤트 큐에 적재
         carnumber_images = _get_carnumber_images()
@@ -235,7 +207,7 @@ async def _handle_speeding_violation(payload: dict):
     if src_path and os.path.exists(src_path):
         result = await run_ocr_on_file(src_path)
         payload["plateNumber"] = result["plate_number"]
-        payload["imageUrl"] = result["image_url"]
+        payload["imageUrl"] = result["image_url"]   # "numberplate/filename.jpg" (프론트에서 prefix 추가)
         payload["isCorrected"] = result.get("is_corrected", False)
         logger.info(f"[Speeding] OCR 완료 — 번호판: {result['plate_number']} | 이미지: {result['image_url']} | 수동검토: {result.get('is_corrected', False)}")
     else:
@@ -251,7 +223,7 @@ class VisionEngine:
         self.rtsp_url = rtsp_url
         self.meta_queue = Queue(maxsize=3)
         self.event_queue = Queue(maxsize=100)
-        self.mjpeg_queue = Queue(maxsize=2)
+        self.mjpeg_queue = Queue(maxsize=10)
 
         self.reader_process = None
         self.ai_process = None
@@ -268,35 +240,11 @@ class VisionEngine:
 
     async def process_event_loop(self):
         """[Process C] 가벼운 API 통신 및 이벤트 처리 루프"""
-        from services.aggregator import congestion_engine
-        from services.webhook_client import webhook_client
-
         while not self.stop_event.is_set():
             try:
                 event = await asyncio.to_thread(self.event_queue.get, True, 0.1)
 
-                if event["type"] == "EMERGENCY":
-                    payload = {
-                        "event_id": f"emg_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:4]}",
-                        "event_type": "emergency_detected",
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                        "camera_id": settings.CAMERA_ID,
-                        "data": {
-                            "track_id": f"track_{event['track_id']}",
-                            "class_name": event["class"],
-                            "confidence": round(event.get("conf", 0.99), 3),
-                            "action_required": "signal_override"
-                        }
-                    }
-                    asyncio.create_task(http_client.send_payload("/api/v1/emergencies", payload))
-
-                elif event["type"] == "ENTER_ROI":
-                    await congestion_engine.record_entry(event["track_id"])
-
-                elif event["type"] == "EXIT_ROI":
-                    await congestion_engine.record_exit(event["track_id"])
-
-                elif event["type"] == "SPEEDING_VIOLATION":
+                if event["type"] == "SPEEDING_VIOLATION":
                     # carnumber 랜덤 이미지 → OCR → webhook 전송
                     asyncio.create_task(_handle_speeding_violation(event["payload"]))
 

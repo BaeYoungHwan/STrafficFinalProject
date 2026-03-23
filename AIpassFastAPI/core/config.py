@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     
     # Backend Comm & Queue Settings
     BACKEND_URL: str = "http://localhost:9000"  # Spring Boot 실제 포트
+    FASTAPI_URL: str = "http://localhost:8000"  # FastAPI 자기 자신 URL (이미지 서빙용, .env로 덮어쓰기 가능)
     QUEUE_MAXSIZE: int = 1000  # OOM 방지용 메모리 큐 최대 크기
     
     # Streaming Settings
@@ -22,8 +23,8 @@ class Settings(BaseSettings):
 
     # [V2 추가] Vision Engine Settings
     YOLO_MODEL: str = "yolo26n.pt"  # V2 요구사항 모델
-    INFERENCE_IMGSZ: int = 640
-    CONF_THRESHOLD: float = 0.3
+    INFERENCE_IMGSZ: int = 416
+    CONF_THRESHOLD: float = 0.4
     TARGET_CLASSES: list = [2, 3, 5, 7] # 승용차, 이륜차, 버스, 화물차
     CAMERA_ID: str = "CAM_INTERSECTION_MAIN"
     SPEED_SCALE_FACTOR: float = 1.0  # 호모그래피 스케일 보정 (.env에서 덮어쓰기 가능)
