@@ -197,7 +197,7 @@ def _ocr_on_image(img: np.ndarray):
             continue
         b_ratio = bw / bh
         b_area_ratio = (bw * bh) / max(img_area, 1)
-        if not (1.2 <= b_ratio <= 9.0 and b_area_ratio <= 0.25 and bw >= 50 and bh >= 10):
+        if not (1.2 <= b_ratio <= 9.0 and b_area_ratio <= 0.25 and bw >= 30 and bh >= 10):
             logger.debug("[OCR] bbox 미통과: %s ratio=%.2f area=%.3f", cleaned, b_ratio, b_area_ratio)
             continue
 
@@ -363,12 +363,23 @@ async def run_ocr_on_file(src_path: str) -> dict:
 
         # ── Stage -1: 전체 이미지 OCR ──
         # bumper 크롭 이전에 전체 frame 탐색 (번호판이 이미지 상단이거나 클로즈업 샷인 경우 대응)
+        # ※ PLATE_PATTERN 일치 시에만 즉시 반환 — 한글 누락 bbox로 조기 종료 방지
+        # ※ 불일치 시에도 bbox/텍스트를 보존하여 최종 폴백으로 활용
         bbox_f, text_f, conf_f, _, _ = _ocr_on_image(frame)
-        if bbox_f is not None:
+        _fb_stage_minus1_crop = None
+        _fb_stage_minus1_text = None
+        _fb_stage_minus1_conf = 0.0
+        if bbox_f is not None and text_f:
             crop_f, *_ = _crop_from_bbox(frame, bbox_f, pad=8)
             if _validate_crop(crop_f):
-                logger.info(f"[OCR Stage-1] 전체이미지 감지: {text_f} (conf={conf_f:.3f})")
-                return crop_f, text_f, conf_f < CONFIDENCE_THRESHOLD
+                if PLATE_PATTERN.match(text_f):
+                    logger.info(f"[OCR Stage-1] 전체이미지 감지: {text_f} (conf={conf_f:.3f})")
+                    return crop_f, text_f, conf_f < CONFIDENCE_THRESHOLD
+                # 패턴 불일치라도 부분 결과 보존 (한글 미인식 케이스 폴백용)
+                logger.debug(f"[OCR Stage-1] 패턴 불일치 보존: {text_f} (conf={conf_f:.3f})")
+                _fb_stage_minus1_crop = crop_f
+                _fb_stage_minus1_text = text_f
+                _fb_stage_minus1_conf = conf_f
 
         # ── Stage 0: 밝기 기반 번호판 영역 사전 크롭 → 직접 OCR ──
         # 흰색 번호판은 어두운 차체/도로 배경에서 가장 밝은 수평 row
@@ -376,46 +387,51 @@ async def run_ocr_on_file(src_path: str) -> dict:
         _s = bright_bumper[int(img_h * 0.05):int(img_h * 0.95), :]
         _gray_s = cv2.cvtColor(_s, cv2.COLOR_BGR2GRAY)
         _brightest_row = int(np.argmax(_gray_s.mean(axis=1)))
-        _half_h = max(15, _s.shape[0] // 10)
+        _half_h = max(20, _s.shape[0] // 8)   # 기존 max(15, //10)에서 확대 → 더 넓은 행 포함
         _r1 = max(0, _brightest_row - _half_h)
         _r2 = min(_s.shape[0], _brightest_row + _half_h)
         _x1, _x2 = int(img_w * 0.10), int(img_w * 0.90)
         _tight_crop = _s[_r1:_r2, _x1:_x2]
 
-        if _validate_crop(_tight_crop):
-            _prep = _preprocess_for_ocr(_tight_crop, binarize=True)
-            _result0 = ocr_model.ocr(_prep)
-            if _result0 and _result0[0]:
-                _texts0, _confs0 = [], []
+        # ※ _tight_crop은 가로로 긴 탐색 스트립 → 비율 검증(ratio≤9.0) 제외, 크기 검증만 수행
+        _strip_ok = _tight_crop.size > 0 and _tight_crop.shape[0] >= 10 and _tight_crop.shape[1] >= 40
+        if _strip_ok:
+            # binarize=True → False 순으로 시도 (이진화 실패 시 한글 획 복원)
+            for _binarize in [True, False]:
+                _prep = _preprocess_for_ocr(_tight_crop, binarize=_binarize)
+                _result0 = ocr_model.ocr(_prep)
+                if not (_result0 and _result0[0]):
+                    continue
+                _texts0, _confs0, _bboxes0 = [], [], []
                 for line in _result0[0]:
                     if line and len(line) >= 2 and isinstance(line[1], (list, tuple)):
                         _texts0.append(re.sub(r'[^0-9가-힣]', '', line[1][0]))
                         _confs0.append(line[1][1])
+                        _bboxes0.append(line[0])
                 _combined0 = "".join(_texts0)
                 _avg_conf0 = sum(_confs0) / len(_confs0) if _confs0 else 0.0
                 if PLATE_PATTERN.match(_combined0):
-                    logger.info(f"[OCR Stage0] 밝기 크롭 직접 인식: {_combined0} (conf={_avg_conf0:.3f})")
-                    return _tight_crop, _combined0, _avg_conf0 < CONFIDENCE_THRESHOLD
-                # ── Stage 0b: 이진화 없이 재시도 (한글 획이 이진화로 뭉개진 경우 복원) ──
-                _prep0b = _preprocess_for_ocr(_tight_crop, binarize=False)
-                _result0b = ocr_model.ocr(_prep0b)
-                if _result0b and _result0b[0]:
-                    _texts0b, _confs0b = [], []
-                    for _line0b in _result0b[0]:
-                        if _line0b and len(_line0b) >= 2 and isinstance(_line0b[1], (list, tuple)):
-                            _texts0b.append(re.sub(r'[^0-9가-힣]', '', _line0b[1][0]))
-                            _confs0b.append(_line0b[1][1])
-                    _combined0b = "".join(_texts0b)
-                    _avg_conf0b = sum(_confs0b) / len(_confs0b) if _confs0b else 0.0
-                    if PLATE_PATTERN.match(_combined0b):
-                        logger.info(f"[OCR Stage0b] 비이진화 재시도 인식: {_combined0b} (conf={_avg_conf0b:.3f})")
-                        return _tight_crop, _combined0b, _avg_conf0b < CONFIDENCE_THRESHOLD
-                if _combined0:
-                    logger.debug(f"[OCR Stage0] 부분 인식: {_combined0} — Stage1 진행")
+                    # OCR bbox로 정밀 크롭 재추출 (전체 스트립 대신 실제 번호판 영역)
+                    if _bboxes0:
+                        _all_xs = [p[0] for b in _bboxes0 for p in b]
+                        _all_ys = [p[1] for b in _bboxes0 for p in b]
+                        _cx1 = max(0, int(min(_all_xs)) + _x1 - 8)
+                        _cy1 = max(0, int(min(_all_ys)) + _r1 + int(img_h * 0.05) - 8)
+                        _cx2 = min(bumper_frame.shape[1], int(max(_all_xs)) + _x1 + 8)
+                        _cy2 = min(bumper_frame.shape[0], int(max(_all_ys)) + _r1 + int(img_h * 0.05) + 8)
+                        _refined = bumper_frame[_cy1:_cy2, _cx1:_cx2]
+                        _crop0 = _refined if _validate_crop(_refined) else _tight_crop
+                    else:
+                        _crop0 = _tight_crop
+                    _lbl = "Stage0" if _binarize else "Stage0b"
+                    logger.info(f"[OCR {_lbl}] 밝기 크롭 인식: {_combined0} (conf={_avg_conf0:.3f})")
+                    return _crop0, _combined0, _avg_conf0 < CONFIDENCE_THRESHOLD
+            if _combined0:
+                logger.debug(f"[OCR Stage0] 부분 인식: {_combined0} — Stage1 진행")
 
         # ── Stage 1: 범퍼 영역 원본 컬러 OCR ──
         bbox, text, conf, fb_texts, avg_conf = _ocr_on_image(bumper_frame)
-        if bbox is not None:
+        if bbox is not None and text and PLATE_PATTERN.match(text):
             crop, x1, y1, x2, y2 = _crop_from_bbox(bumper_frame, bbox)
             if _validate_crop(crop):
                 logger.info(f"[OCR Stage1] 번호판 감지: {text} (conf={conf:.3f}, box={x1},{y1}-{x2},{y2})")
@@ -424,7 +440,7 @@ async def run_ocr_on_file(src_path: str) -> dict:
         # ── Stage 1b: 밝기 보정 후 OCR (야간 이미지 대응) ──
         if bright_bumper is not bumper_frame:
             bbox1b, text1b, conf1b, fb_texts1b, avg_conf1b = _ocr_on_image(bright_bumper)
-            if bbox1b is not None:
+            if bbox1b is not None and text1b and PLATE_PATTERN.match(text1b):
                 crop1b, x1, y1, x2, y2 = _crop_from_bbox(bumper_frame, bbox1b)
                 if _validate_crop(crop1b):
                     logger.info(f"[OCR Stage1b] 야간보정 감지: {text1b} (conf={conf1b:.3f})")
@@ -435,7 +451,7 @@ async def run_ocr_on_file(src_path: str) -> dict:
         # ── Stage 2: CLAHE 전처리 후 OCR 재시도 ──
         clahe_img = _preprocess_for_ocr(bright_bumper, binarize=False)
         bbox2, text2, conf2, fb_texts2, avg_conf2 = _ocr_on_image(clahe_img)
-        if bbox2 is not None:
+        if bbox2 is not None and text2 and PLATE_PATTERN.match(text2):
             crop2, x1, y1, x2, y2 = _crop_from_bbox(bumper_frame, bbox2)
             if _validate_crop(crop2):
                 logger.info(f"[OCR Stage2] CLAHE 감지: {text2} (conf={conf2:.3f}, box={x1},{y1}-{x2},{y2})")
@@ -469,7 +485,7 @@ async def run_ocr_on_file(src_path: str) -> dict:
             if region.size == 0:
                 continue
             bboxW, textW, confW, fb_textsW, avg_confW = _ocr_on_image(region)
-            if bboxW is not None and textW is not None:
+            if bboxW is not None and textW is not None and PLATE_PATTERN.match(textW):
                 xs = [p[0] for p in bboxW]
                 ys = [p[1] for p in bboxW]
                 rx1 = max(0, int(min(xs)) - 8)
@@ -497,6 +513,10 @@ async def run_ocr_on_file(src_path: str) -> dict:
         logger.warning(f"[OCR] 4단계 모두 실패 — fallback 텍스트: {combined} (avg_conf={all_conf:.3f})")
         if all_conf >= CONFIDENCE_THRESHOLD and combined:
             return None, f"MANUAL_REVIEW_REQUIRED:{combined}", True
+        # ── Stage -1 보존 결과 최후 활용 (번호판이 범퍼 영역 밖에 있는 경우) ──
+        if _fb_stage_minus1_text:
+            logger.warning(f"[OCR] Stage-1 부분 결과 활용: {_fb_stage_minus1_text} (conf={_fb_stage_minus1_conf:.3f})")
+            return _fb_stage_minus1_crop, f"MANUAL_REVIEW_REQUIRED:{_fb_stage_minus1_text}", True
         return None, "UNRECOGNIZED", False
 
     # OCR 전용 executor + 세마포어로 동시 실행 수 제한 (MJPEG 스트림 스레드 보호)
