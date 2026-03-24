@@ -198,12 +198,13 @@ def ai_inference_worker(meta_queue: Queue, event_queue: Queue, mjpeg_queue: Queu
                 try:
                     mjpeg_queue.get_nowait()
                     mjpeg_queue.put_nowait(frame_bytes)
-                except:
+                except queue.Full:
                     pass
 
 
 async def _handle_speeding_violation(payload: dict):
     """과속 이벤트: carnumber 이미지에 OCR 실행 → webhook 전송"""
+    payload["cameraId"] = vision_engine.camera_id
     src_path = payload.pop("src_image_path", None)
     if src_path:
         payload["srcImageUrl"] = f"carnumber/{os.path.basename(src_path)}"
@@ -225,6 +226,7 @@ async def _handle_speeding_violation(payload: dict):
 class VisionEngine:
     def __init__(self, rtsp_url: str):
         self.rtsp_url = rtsp_url
+        self.camera_id: str = settings.CAMERA_ID
         self.meta_queue = Queue(maxsize=3)
         self.event_queue = Queue(maxsize=100)
         self.mjpeg_queue = Queue(maxsize=10)
@@ -267,10 +269,10 @@ class VisionEngine:
         self.rtsp_url = new_url
         while not self.meta_queue.empty():
             try: self.meta_queue.get_nowait()
-            except: break
+            except queue.Empty: break
         while not self.mjpeg_queue.empty():
             try: self.mjpeg_queue.get_nowait()
-            except: break
+            except queue.Empty: break
         self.start()
 
 

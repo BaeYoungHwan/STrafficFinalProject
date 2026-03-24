@@ -6,18 +6,14 @@ import asyncio
 import httpx
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, UploadFile, Form
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-import numpy as np
-import cv2
-
 from core.config import settings
 from core.hardware import check_hardware_acceleration
 from services.vision import vision_engine
 from services.aggregator import start_aggregators, stop_aggregators
 from services.webhook_client import webhook_client
-from services.ocr_storage import process_violation_task
 from utils.http_client import http_client
 from api import stream
 
@@ -48,16 +44,18 @@ async def lifespan(app: FastAPI):
                 data = resp.json()
                 if data.get("success") and data.get("data", {}).get("url"):
                     vision_engine.rtsp_url = data["data"]["url"]
+                    vision_engine.camera_id = data["data"].get("cctvId", settings.CAMERA_ID)
                     logger.info("[AI-Target] CCTV URL: %s", vision_engine.rtsp_url)
                 else:
                     logger.warning("[AI-Target] 응답 파싱 실패 — fallback URL 사용")
         except Exception as e:
             logger.warning("[AI-Target] Spring Boot 미연결 — fallback URL 사용: %s", e)
 
-        vision_engine.start()
-
-        # 이벤트 처리 루프 (Process C) — process_event_loop 자체가 내부 루프를 가짐
-        asyncio.create_task(vision_engine.process_event_loop())
+        if vision_engine.rtsp_url:
+            vision_engine.start()
+            asyncio.create_task(vision_engine.process_event_loop())
+        else:
+            logger.warning("[Vision] VIDEO_SOURCE_URL 미설정 — 엔진 대기 중. POST /stream/source 로 URL 지정 후 시작 가능.")
 
         start_aggregators()
 
@@ -100,15 +98,3 @@ app.mount("/images", StaticFiles(directory="data"), name="images")
 @app.get("/health", tags=["System"])
 async def health_check():
     return {"status": "ok", "message": "AI-Pass Core is running"}
-
-
-@app.post("/api/v1/test/trigger-violation", tags=["Test"])
-async def test_trigger_violation(
-    violation_type: str = Form(...),
-    file: UploadFile = File(...),
-):
-    """[Postman 테스트용] 업로드된 이미지로 OCR 및 백엔드 전송을 강제 실행합니다."""
-    contents = await file.read()
-    frame = cv2.imdecode(np.frombuffer(contents, np.uint8), cv2.IMREAD_COLOR)
-    payload = await process_violation_task(frame, violation_type, 0.95)
-    return {"status": "success", "payload_generated": payload}
