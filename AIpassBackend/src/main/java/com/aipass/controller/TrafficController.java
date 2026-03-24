@@ -10,6 +10,13 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * 교통 흐름 API
+ *
+ * <p>NOTE: 현재 getDummyIntersections(), getDummyTrafficFlow() 는 하드코딩된 더미 데이터를
+ * 반환합니다. DB 연동 (intersections, traffic_flow 테이블 설계) 은 추후 스프린트에서
+ * 진행 예정입니다.</p>
+ */
 @RestController
 @RequestMapping("/api/traffic")
 public class TrafficController {

@@ -31,10 +31,16 @@ class Settings(BaseSettings):
     
     # [V2 추가] 동영상 소스 URL (.env의 VIDEO_SOURCE_URL로 덮어쓰기 가능)
     # 지원 형식: 로컬 파일 (C:/path/video.mp4), RTSP (rtsp://...), HTTP (http://...)
-    VIDEO_SOURCE_URL: str = "rtsp://localhost:8554/korea_intersection_01"
+    VIDEO_SOURCE_URL: str = ""
 
     # [Flow C] Emergency Classes
     EMERGENCY_CLASSES: list = [9, 10]  # 구급차, 소방차 등 (커스텀 모델 기준)
+
+    # Speed Detection Constants
+    SPEED_LIMIT_KMH: float = 70.0
+    MAX_PLAUSIBLE_SPEED_KMH: float = 100.0
+    EMA_ALPHA: float = 0.3
+    CONSECUTIVE_OVER_THRESHOLD: int = 5
     
     
 settings = Settings()

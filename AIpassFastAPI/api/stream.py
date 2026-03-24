@@ -59,7 +59,10 @@ class StreamSourceRequest(BaseModel):
 @router.post("/stream/source", summary="동영상 소스 변경")
 async def change_stream_source(body: StreamSourceRequest):
     try:
+        first_start = vision_engine.reader_process is None
         vision_engine.restart(body.url)
+        if first_start:
+            asyncio.create_task(vision_engine.process_event_loop())
         logger.info("[Stream] Source changed to: %s", body.url)
         return {"success": True, "message": f"Stream source updated to: {body.url}"}
     except Exception as e:

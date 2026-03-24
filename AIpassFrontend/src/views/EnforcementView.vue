@@ -125,7 +125,7 @@
             <div class="image-box-label">차량 전체</div>
             <img
               v-if="selectedItem.srcImageUrl"
-              :src="'http://localhost:8000/images/' + selectedItem.srcImageUrl"
+              :src="'/ai/images/' + selectedItem.srcImageUrl"
               alt="차량 전체 사진"
               @error="$event.target.style.display='none'"
             />
@@ -135,7 +135,7 @@
             <div class="image-box-label">번호판 크롭</div>
             <img
               v-if="selectedItem.imageUrl"
-              :src="'http://localhost:8000/images/' + selectedItem.imageUrl"
+              :src="'/ai/images/' + selectedItem.imageUrl"
               alt="번호판"
               @error="$event.target.style.display='none'"
             />
@@ -232,7 +232,7 @@
         <button class="btn-close" @click="showStreamModal = false">✕</button>
       </div>
       <img
-        src="http://127.0.0.1:8000/api/v1/stream/video"
+        :src="streamUrl"
         alt="실시간 스트리밍"
         class="stream-img"
       />
@@ -256,6 +256,7 @@ const editSuccess = ref(false)
 
 // 스트리밍 모달
 const showStreamModal = ref(false)
+const streamUrl = ref('')
 
 const page = ref(1)
 const size = ref(10)
@@ -362,7 +363,6 @@ const updateViolation = async () => {
     editSuccess.value = true
     setTimeout(() => { editSuccess.value = false }, 3000)
   } catch (e) {
-    console.error('[updateViolation] 실패:', e.response?.status, e.response?.data)
     alert(`수정에 실패했습니다. (${e.response?.status ?? e.message ?? 'unknown'})`)
   } finally {
     submitting.value = false
@@ -384,7 +384,16 @@ const updateStatus = async (newStatus) => {
   }
 }
 
-onMounted(fetchList)
+onMounted(async () => {
+  fetchList()
+  try {
+    const res = await api.get('/cctv/list')
+    const ganghwa = (res.data.data || []).find(c => c.cctvName?.includes('강화대교'))
+    if (ganghwa?.streamUrl) streamUrl.value = ganghwa.streamUrl
+  } catch (e) {
+    // 조회 실패 시 streamUrl 빈 값 유지
+  }
+})
 </script>
 
 <style scoped>
