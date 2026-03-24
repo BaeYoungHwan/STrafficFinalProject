@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.aipass.dao.DashboardMapper">
+
+    <!-- 교차로 전체 목록 조회 -->
+    <select id="findAllIntersections" resultType="com.aipass.dto.DashboardIntersectionDTO">
+        SELECT
+            intersection_id,
+            name,
+            latitude,
+            longitude
+        FROM intersection
+        ORDER BY intersection_id ASC
+    </select>
+
+    <!-- 날씨 최신 1건 조회 (교차로 무관 전체 최신) -->
+    <select id="findLatestWeather" resultType="com.aipass.dto.WeatherLogDTO">
+        SELECT
+            weather_id,
+            intersection_id,
+            temperature,
+            humidity,
+            wind_speed,
+            wind_direction,
+            precipitation,
+            precipitation_type,
+            sky_condition,
+            visibility,
+            collected_at,
+            created_at
+        FROM weather_log
+        ORDER BY collected_at DESC
+        LIMIT 1
+    </select>
+
+    <!-- 오늘 단속 건수 집계 -->
+    <select id="findTodayViolationSummary" resultType="com.aipass.dto.DashboardViolationSummaryDTO">
+        SELECT
+            COUNT(*)                                             AS total_count,
+            COUNT(*) FILTER (WHERE violation_type = '과속')     AS speed_count,
+            COUNT(*) FILTER (WHERE violation_type != '과속')    AS other_count
+        FROM violation_log
+        WHERE detected_at::date = CURRENT_DATE
+    </select>
+
+</mapper>
