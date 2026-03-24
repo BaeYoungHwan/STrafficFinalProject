@@ -47,6 +47,12 @@ public class EnforcementController {
                 dto.setSpeedKmh(((Number) speed).doubleValue());
             }
 
+            Object needsReviewObj = body.get("needsReview");
+            boolean needsReview = needsReviewObj instanceof Boolean ? (Boolean) needsReviewObj : false;
+            dto.setNeedsReview(needsReview);
+            // 수동검토 불필요(고신뢰도) → 자동 승인, 수동검토 필요 → 대기중
+            dto.setFineStatus(needsReview ? "UNPROCESSED" : "APPROVED");
+
             violationMapper.insert(dto);
             return ResponseEntity.ok(Map.of("success", true));
         } catch (Exception e) {
@@ -118,7 +124,7 @@ public class EnforcementController {
     }
 
     /**
-     * 단속 내역 수정: 차량번호, 위반유형, 상태 변경 + is_corrected=true
+     * 단속 내역 수정: 차량번호, 위반유형, 상태 변경 + needs_review=true
      */
     @PutMapping("/violations/{id}")
     public ResponseEntity<?> updateViolation(@PathVariable Long id, @RequestBody Map<String, String> body) {

@@ -233,12 +233,12 @@ class ViolationMapperTest {
     }
 
     // =========================================================================
-    // update (is_corrected)
+    // update (needs_review)
     // =========================================================================
 
     @Test
-    @DisplayName("update_SetsIsCorrectedTrue: update 호출 후 is_corrected=true, 번호판이 갱신되어야 한다")
-    void update_SetsIsCorrectedTrue() {
+    @DisplayName("update_SetsNeedsReviewTrue: update 호출 후 needs_review=true, 번호판이 갱신되어야 한다")
+    void update_SetsNeedsReviewTrue() {
         ViolationDTO dto = buildDto("66아6666", "과속");
         violationMapper.insert(dto);
 
@@ -253,7 +253,7 @@ class ViolationMapperTest {
 
         Long id = insertedDto.getViolationId();
 
-        // 번호판 수정 요청 (update SQL은 is_corrected = true 를 항상 설정)
+        // 번호판 수정 요청 (update SQL은 needs_review = true 를 항상 설정)
         ViolationDTO updateDto = new ViolationDTO();
         updateDto.setViolationId(id);
         updateDto.setPlateNumber("77자7777");        // 수정된 번호판
@@ -265,7 +265,7 @@ class ViolationMapperTest {
         assertThat(result).isNotNull();
         assertThat(result.getPlateNumber()).isEqualTo("77자7777");
         assertThat(result.getViolationType()).isEqualTo("신호위반");
-        // violation.xml의 update SQL: is_corrected = true 고정
-        assertThat(result.getIsCorrected()).isTrue();
+        // violation.xml의 update SQL: needs_review = true 고정
+        assertThat(result.getNeedsReview()).isTrue();
     }
 }

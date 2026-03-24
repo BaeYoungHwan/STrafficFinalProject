@@ -27,7 +27,7 @@
             image_url,
             src_image_url,
             fine_status,
-            is_corrected,
+            needs_review,
             speed_kmh,
             TO_CHAR(detected_at AT TIME ZONE 'Asia/Seoul', 'YY-MM-DD HH24:MI:SS') AS detected_at
         FROM violation_log
@@ -50,7 +50,7 @@
             image_url,
             src_image_url,
             fine_status,
-            is_corrected,
+            needs_review,
             speed_kmh,
             TO_CHAR(detected_at AT TIME ZONE 'Asia/Seoul', 'YY-MM-DD HH24:MI:SS') AS detected_at
         FROM violation_log
@@ -58,8 +58,8 @@
     </select>
 
     <insert id="insert" parameterType="com.aipass.dto.ViolationDTO">
-        INSERT INTO violation_log (event_id, plate_number, violation_type, image_url, src_image_url, speed_kmh, fine_status)
-        VALUES (#{eventId}, #{plateNumber}, #{violationType}, #{imageUrl}, #{srcImageUrl}, #{speedKmh}, 'UNPROCESSED')
+        INSERT INTO violation_log (event_id, plate_number, violation_type, image_url, src_image_url, speed_kmh, fine_status, needs_review)
+        VALUES (#{eventId}, #{plateNumber}, #{violationType}, #{imageUrl}, #{srcImageUrl}, #{speedKmh}, #{fineStatus}, #{needsReview})
         ON CONFLICT (event_id) DO NOTHING
     </insert>
 
@@ -72,7 +72,7 @@
         SET plate_number   = #{plateNumber},
             violation_type = #{violationType},
             fine_status    = #{fineStatus},
-            is_corrected   = true
+            needs_review   = true
         WHERE violation_id = #{violationId}
     </update>
 

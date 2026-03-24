@@ -212,7 +212,7 @@ def diagnose_one(src_path: str, ocr_model, _normalize_ocr_result,
     result = asyncio.run(run_ocr_on_file(src_path))
     plate    = result["plate_number"]
     img_url  = result["image_url"]
-    is_cor   = result["is_corrected"]
+    is_cor   = result["needs_review"]
     has_kor  = bool(HAN.search(plate))
     is_valid = bool(PLATE_PATTERN.match(plate))
 

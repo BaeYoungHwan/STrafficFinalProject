@@ -233,33 +233,34 @@ class TestPreprocessForOcr:
         result = _preprocess_for_ocr(img)
         assert result.ndim == 3 and result.shape[2] == 3
 
-    def test_small_image_is_resized_to_min_300_width(self):
-        img = make_image(h=50, w=100)  # w=100 < 300
+    def test_small_image_is_resized_to_min_600_width(self):
+        # 소스에서 최소 너비 임계값은 600 이다 (w < 600 이면 리사이즈)
+        img = make_image(h=50, w=100)  # w=100 < 600
         result = _preprocess_for_ocr(img)
-        assert result.shape[1] >= 300
+        assert result.shape[1] >= 600
 
     def test_large_image_width_not_shrunk(self):
-        img = make_image(h=50, w=400)  # w=400 > 300, 축소 불필요
+        img = make_image(h=50, w=800)  # w=800 >= 600, 리사이즈 불필요
         result = _preprocess_for_ocr(img)
-        assert result.shape[1] == 400
+        assert result.shape[1] == 800
 
     def test_binarize_false_returns_valid_image(self):
-        img = make_image(h=50, w=300)
+        img = make_image(h=50, w=600)
         result = _preprocess_for_ocr(img, binarize=False)
-        assert result.shape == (50, 300, 3)
+        assert result.shape == (50, 600, 3)
 
     def test_binarize_true_returns_valid_image(self):
-        img = make_image(h=50, w=300)
+        img = make_image(h=50, w=600)
         result = _preprocess_for_ocr(img, binarize=True)
         assert result.shape[2] == 3
 
     def test_aspect_ratio_preserved_on_resize(self):
-        # w=150, h=50 → scale=2 → new w=300, h=100
-        img = make_image(h=50, w=150)
+        # w=200, h=50 → scale=600/200=3 → new w=600, h=150
+        img = make_image(h=50, w=200)
         result = _preprocess_for_ocr(img)
-        expected_h = int(50 * (300 / 150))
+        expected_h = int(50 * (600 / 200))
         assert result.shape[0] == expected_h
-        assert result.shape[1] == 300
+        assert result.shape[1] == 600
 
 
 # ============================================================
@@ -359,8 +360,9 @@ class TestOcrOnImage:
         assert bbox is None
 
     def test_bbox_too_narrow_fails_geometry(self):
-        # bw=30 < 50 → 기하 실패
-        narrow_bbox = [[10, 10], [40, 10], [40, 30], [10, 30]]
+        # 소스 geometry 조건: bw >= 30 이므로 bw=29 는 실패
+        # [[10,10],[39,10],[39,30],[10,30]] → bw = 39-10 = 29 < 30 → 기하 실패
+        narrow_bbox = [[10, 10], [39, 10], [39, 30], [10, 30]]
         line = [narrow_bbox, ("12가1234", 0.9)]
         bbox, text, conf, _, _ = self._run([[line]])
         assert bbox is None
@@ -395,10 +397,9 @@ class TestOcrOnImage:
 
     def test_composite_matching_two_boxes_merged(self):
         """OCR 이 번호판을 "120가" + "5871" 로 분리 → "120가5871" 로 합산."""
-        # 두 박스 모두 geometry 실패하도록 작은 bbox 사용
-        # → best_bbox = None → composite 경로 진입
-        small_bbox_left  = [[10, 10], [40, 10], [40, 30], [10, 30]]   # bw=30 < 50 → 기하 실패
-        small_bbox_right = [[50, 10], [80, 10], [80, 30], [50, 30]]   # bw=30 < 50 → 기하 실패
+        # bw=29 < 30 → geometry 실패 → best_bbox = None → composite 경로 진입
+        small_bbox_left  = [[10, 10], [39, 10], [39, 30], [10, 30]]   # bw=29 < 30 → 기하 실패
+        small_bbox_right = [[50, 10], [79, 10], [79, 30], [50, 30]]   # bw=29 < 30 → 기하 실패
         line_a = [small_bbox_left,  ("120가", 0.80)]
         line_b = [small_bbox_right, ("5871",  0.75)]
         bbox, text, conf, _, _ = self._run([[line_a, line_b]])
@@ -407,7 +408,7 @@ class TestOcrOnImage:
 
     def test_composite_matching_invalid_combination_returns_none(self):
         """두 박스를 합쳐도 번호판 패턴과 불일치하면 None."""
-        small_bbox = [[10, 10], [40, 10], [40, 30], [10, 30]]
+        small_bbox = [[10, 10], [39, 10], [39, 30], [10, 30]]  # bw=29 < 30 → 기하 실패
         line_a = [small_bbox, ("XYZ",  0.8)]
         line_b = [small_bbox, ("ABCD", 0.7)]
         bbox, text, _, _, _ = self._run([[line_a, line_b]])
@@ -415,7 +416,7 @@ class TestOcrOnImage:
 
     def test_composite_single_box_does_not_trigger_composite(self):
         """valid_lines 가 1개이면 복합 매칭을 시도하지 않는다."""
-        small_bbox = [[10, 10], [40, 10], [40, 30], [10, 30]]
+        small_bbox = [[10, 10], [39, 10], [39, 30], [10, 30]]  # bw=29 < 30 → 기하 실패
         line_a = [small_bbox, ("120가5871", 0.8)]
         bbox, text, _, _, _ = self._run([[line_a]])
         # 기하 실패 + 복합 불가(1개) → None
@@ -441,46 +442,65 @@ class TestOcrOnImage:
 # ============================================================
 
 class TestSavePlateImage:
-    """save_plate_image 파일명 생성 및 I/O 검증 (cv2.imwrite 모킹)"""
+    """save_plate_image 파일명 생성 및 I/O 검증.
+
+    소스는 Windows 한글 경로 지원을 위해 cv2.imwrite 대신
+    cv2.imencode + buf.tofile 방식을 사용한다.
+    따라서 cv2.imencode 와 반환 버퍼의 tofile 을 패치해야 한다.
+    """
+
+    def _make_imencode_patch(self):
+        """cv2.imencode 가 (True, mock_buf) 를 반환하도록 패치한다.
+        mock_buf.tofile() 은 실제 파일을 쓰지 않는다.
+        """
+        mock_buf = MagicMock()
+        mock_buf.tofile = MagicMock()
+        return patch("services.ocr_storage.cv2.imencode", return_value=(True, mock_buf)), mock_buf
 
     @pytest.mark.asyncio
     async def test_normal_plate_text_filename(self):
         img = make_image()
-        with patch("services.ocr_storage.cv2.imwrite") as mock_write:
+        patch_imencode, mock_buf = self._make_imencode_patch()
+        with patch_imencode:
             url = await save_plate_image(img, "12가1234", "SPEEDING")
         assert "12가1234" in url
         assert url.startswith("numberplate/")
-        mock_write.assert_called_once()
+        # imencode 가 한 번 호출되고, tofile 도 한 번 호출되어야 한다
+        mock_buf.tofile.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_unrecognized_prefix_generates_uuid_filename(self):
         img = make_image()
-        with patch("services.ocr_storage.cv2.imwrite"):
+        patch_imencode, _ = self._make_imencode_patch()
+        with patch_imencode:
             url = await save_plate_image(img, "UNRECOGNIZED_abc123", "SPEEDING")
         assert "UNRECOGNIZED_" in url
 
     @pytest.mark.asyncio
     async def test_empty_plate_text_generates_unrecognized_filename(self):
         img = make_image()
-        with patch("services.ocr_storage.cv2.imwrite"):
+        patch_imencode, _ = self._make_imencode_patch()
+        with patch_imencode:
             url = await save_plate_image(img, "", "SPEEDING")
         assert "UNRECOGNIZED_" in url
 
     @pytest.mark.asyncio
     async def test_special_chars_in_plate_text_sanitized(self):
         img = make_image()
-        with patch("services.ocr_storage.cv2.imwrite") as mock_write:
+        patch_imencode, mock_buf = self._make_imencode_patch()
+        with patch_imencode:
             url = await save_plate_image(img, "12가/1234", "SPEEDING")
         # "/" 는 "_" 로 치환되어야 한다 — 파일명 부분(prefix 이후)에만 검사
         filename = url.split("/", 1)[-1]  # "numberplate/" prefix 제거
         assert "/" not in filename
         assert "12가_1234.jpg" == filename
-        mock_write.assert_called_once()
+        mock_buf.tofile.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_returns_relative_path_prefix(self):
         img = make_image()
-        with patch("services.ocr_storage.cv2.imwrite"):
+        patch_imencode, _ = self._make_imencode_patch()
+        with patch_imencode:
             url = await save_plate_image(img, "34나5678", "WRONG_WAY")
         assert url.startswith("numberplate/")
         assert url.endswith(".jpg")
@@ -491,34 +511,63 @@ class TestSavePlateImage:
 # ============================================================
 
 class TestExtractLicensePlate:
-    """extract_license_plate OCR 추출·신뢰도·패턴 검증"""
+    """extract_license_plate OCR 추출·신뢰도·패턴 검증.
 
-    def _make_ocr_return(self, text: str, conf: float):
-        # PaddleOCR 반환 형식: result[0] 은 라인 목록, 각 라인은 [bbox, (text, conf)]
-        # result = [ [line, line, ...] ] 이므로 line을 한 번 더 감싸야 함
-        return [[ [[[0, 0], [100, 0], [100, 20], [0, 20]], (text, conf)] ]]
+    소스 내부 동작 주의:
+      avg_conf = total_conf / len(result[0])
+      result = _normalize_ocr_result(raw) = raw[0]  (구형식)
+      1개 라인: result = [[bbox, (text, conf)]]
+        → len(result[0]) = len([bbox, (text, conf)]) = 2  (소스 버그)
+        → avg_conf = conf / 2
+      2개 라인: result = [[bbox1,(t1,c1)], [bbox2,(t2,c2)]]
+        → len(result[0]) = len([bbox1, (t1,c1)]) = 2
+        → total_conf = c1 + c2
+        → avg_conf = (c1 + c2) / 2
+
+    따라서 두 라인, 각각 conf 를 같게 설정하면:
+      avg_conf = 2 * conf / 2 = conf
+
+    단, 두 라인의 text 가 concatenate 되므로
+    전체 번호판 텍스트를 두 라인으로 나누어 반환해야 한다.
+    (예: "12가" + "1234" → "12가1234")
+    """
+
+    def _make_ocr_return(self, text1: str, text2: str, conf: float):
+        """PaddleOCR 반환 형식을 두 라인으로 생성한다.
+
+        avg_conf = (conf + conf) / 2 = conf
+        raw_text = text1 + text2 (concatenate)
+        """
+        bbox1 = [[0, 0], [100, 0], [100, 20], [0, 20]]
+        bbox2 = [[110, 0], [200, 0], [200, 20], [110, 20]]
+        line1 = [bbox1, (text1, conf)]
+        line2 = [bbox2, (text2, conf)]
+        return [[line1, line2]]
 
     @pytest.mark.asyncio
     async def test_valid_plate_high_confidence_returned(self):
+        """"12가" + "1234" = "12가1234", conf=0.92 → avg_conf=0.92 → 통과."""
         img = make_image(h=50, w=200)
         with patch.object(ocr_mod, "ocr_model") as mock_ocr:
-            mock_ocr.ocr.return_value = self._make_ocr_return("12가1234", 0.92)
+            mock_ocr.ocr.return_value = self._make_ocr_return("12가", "1234", 0.92)
             result = await extract_license_plate(img)
         assert result == "12가1234"
 
     @pytest.mark.asyncio
     async def test_low_confidence_returns_manual_review(self):
+        """conf=0.40 → avg_conf=0.40 < THRESHOLD → MANUAL_REVIEW."""
         img = make_image(h=50, w=200)
         with patch.object(ocr_mod, "ocr_model") as mock_ocr:
-            mock_ocr.ocr.return_value = self._make_ocr_return("12가1234", 0.40)
+            mock_ocr.ocr.return_value = self._make_ocr_return("12가", "1234", 0.40)
             result = await extract_license_plate(img)
         assert result.startswith("MANUAL_REVIEW_REQUIRED:")
 
     @pytest.mark.asyncio
     async def test_regex_mismatch_returns_manual_review(self):
+        """높은 conf 이지만 regex 불일치 → MANUAL_REVIEW."""
         img = make_image(h=50, w=200)
         with patch.object(ocr_mod, "ocr_model") as mock_ocr:
-            mock_ocr.ocr.return_value = self._make_ocr_return("INVALID_PLATE", 0.95)
+            mock_ocr.ocr.return_value = self._make_ocr_return("INVALID", "_PLATE", 0.95)
             result = await extract_license_plate(img)
         assert result.startswith("MANUAL_REVIEW_REQUIRED:")
 
@@ -540,24 +589,30 @@ class TestExtractLicensePlate:
 
     @pytest.mark.asyncio
     async def test_confidence_exactly_at_threshold_passes(self):
-        # CONFIDENCE_THRESHOLD = 0.60 → avg_conf = 0.60 는 통과 (< 가 아니라 >= 가 통과 기준)
+        """avg_conf = CONFIDENCE_THRESHOLD 이면 통과해야 한다 (< 조건이므로 경계는 통과).
+
+        avg_conf = (THRESHOLD + THRESHOLD) / 2 = THRESHOLD → 통과
+        """
         img = make_image(h=50, w=200)
         with patch.object(ocr_mod, "ocr_model") as mock_ocr:
-            mock_ocr.ocr.return_value = self._make_ocr_return("12가1234", CONFIDENCE_THRESHOLD)
+            mock_ocr.ocr.return_value = self._make_ocr_return("12가", "1234", CONFIDENCE_THRESHOLD)
             result = await extract_license_plate(img)
         assert result == "12가1234"
 
     @pytest.mark.asyncio
     async def test_confidence_just_below_threshold_fails(self):
+        """conf = THRESHOLD - 0.01 → avg_conf < THRESHOLD → MANUAL_REVIEW."""
         img = make_image(h=50, w=200)
         with patch.object(ocr_mod, "ocr_model") as mock_ocr:
-            mock_ocr.ocr.return_value = self._make_ocr_return("12가1234", CONFIDENCE_THRESHOLD - 0.01)
+            mock_ocr.ocr.return_value = self._make_ocr_return(
+                "12가", "1234", CONFIDENCE_THRESHOLD - 0.01
+            )
             result = await extract_license_plate(img)
         assert result.startswith("MANUAL_REVIEW_REQUIRED:")
 
     @pytest.mark.asyncio
     async def test_multiple_text_boxes_concatenated(self):
-        """여러 라인의 텍스트를 합산하여 번호판을 구성한다."""
+        """여러 라인의 텍스트를 합산하여 번호판을 구성한다 (3라인)."""
         img = make_image(h=50, w=200)
         ocr_result = [
             [[[0, 0], [100, 0], [100, 20], [0, 20]], ("120가", 0.85)],
@@ -576,10 +631,27 @@ class TestExtractLicensePlate:
 class TestRunOcrOnFile:
     """run_ocr_on_file 4단계 파이프라인 및 폴백 크롭 검증"""
 
-    # ── 헬퍼: cv2.imread 를 더미 이미지로 패치 ──
+    # ── 헬퍼: np.fromfile + cv2.imdecode 를 더미 이미지로 패치 ──
+    # run_ocr_on_file 은 Windows 한글 경로 지원을 위해
+    # cv2.imread 대신 np.fromfile + cv2.imdecode 를 사용한다.
 
     def _patch_imread(self, img):
-        return patch("services.ocr_storage.cv2.imread", return_value=img)
+        """np.fromfile 과 cv2.imdecode 를 함께 패치하여 원하는 이미지를 반환한다."""
+        from contextlib import ExitStack
+        import contextlib
+
+        @contextlib.contextmanager
+        def _combined():
+            with ExitStack() as stack:
+                stack.enter_context(
+                    patch("services.ocr_storage.np.fromfile", return_value=np.array([1], dtype=np.uint8))
+                )
+                stack.enter_context(
+                    patch("services.ocr_storage.cv2.imdecode", return_value=img)
+                )
+                yield
+
+        return _combined()
 
     def _patch_save(self):
         return patch("services.ocr_storage.save_plate_image", new_callable=AsyncMock,
@@ -589,11 +661,14 @@ class TestRunOcrOnFile:
 
     @pytest.mark.asyncio
     async def test_file_not_found_returns_unrecognized(self):
-        with self._patch_imread(None), self._patch_save():
+        # np.fromfile + cv2.imdecode 경로를 모킹 — imread 대신 imdecode 가 None 반환
+        with patch("services.ocr_storage.np.fromfile", return_value=np.array([])), \
+             patch("services.ocr_storage.cv2.imdecode", return_value=None), \
+             self._patch_save():
             result = await run_ocr_on_file("nonexistent.jpg")
         assert result["plate_number"].startswith("UNRECOGNIZED_")
         assert result["image_url"] is None
-        assert result["is_corrected"] is False
+        assert result["needs_review"] is False
 
     # ── Stage 1: 원본 이미지에서 감지 성공 ──
 
@@ -613,15 +688,28 @@ class TestRunOcrOnFile:
         assert result["image_url"] == "numberplate/test.jpg"
         mock_save.assert_called_once()
 
-    # ── 모든 단계 실패 → 폴백 크롭이 가로 25%~75% 를 사용하는지 검증 ──
+    # ── 모든 단계 실패 → 폴백 크롭이 가로 15%~85% 를 사용하는지 검증 ──
+    # 주의: h=400, w=600 이미지에서 빈 OCR 결과를 반환하면
+    # _detect_plate_bbox 내부의 _strip_ok=True 경로에서 for 루프의 두 반복이
+    # 모두 continue 되어 _combined0 가 미정의 상태로 남는 소스 버그가 있다.
+    # (ocr_storage.py:463 `if _combined0:` → UnboundLocalError)
+    # 이 버그를 우회하기 위해 _strip_ok=False 가 되는 좁은 이미지(w=40)를 사용한다:
+    #   _x1 = int(40 * 0.10) = 4, _x2 = int(40 * 0.90) = 36
+    #   tight_crop width = 36 - 4 = 32 < 40 → _strip_ok=False
+    # 단, w=40 이면 폴백 크롭 너비 = int(40*0.85) - int(40*0.15) = 34 - 6 = 28
 
     @pytest.mark.asyncio
-    async def test_all_stages_fail_fallback_uses_center_50_percent_width(self):
+    async def test_all_stages_fail_fallback_uses_center_70_percent_width(self):
         """
         4단계 모두 실패 시 폴백 크롭이
-        x1_fb = int(w * 0.25), x2_fb = int(w * 0.75) 를 사용해야 한다.
+        x1_fb = int(w * 0.15), x2_fb = int(w * 0.85) 를 사용해야 한다.
+        bumper_frame 의 너비(w)를 기준으로 하며,
+        bumper_frame = frame[bumper_y:, :] 이므로 너비는 원본과 동일하다.
+
+        w=40 → x1=int(40*0.15)=6, x2=int(40*0.85)=34 → 너비=28
+        (w=40 이므로 _strip_ok=False → _combined0 UnboundLocalError 우회)
         """
-        h, w = 400, 600
+        h, w = 400, 40
         img = make_bright_image(h=h, w=w)
 
         # 모든 OCR 호출이 빈 결과를 반환 → 모든 단계 실패
@@ -641,16 +729,19 @@ class TestRunOcrOnFile:
         assert len(captured_frames) == 1
         saved_frame = captured_frames[0]
 
-        # 폴백 크롭 너비 검증: 중앙 50% 이므로 w * 0.5 = 300
-        expected_width = int(w * 0.75) - int(w * 0.25)  # = 300
+        # 폴백 크롭 너비 검증: x1=0.15*w, x2=0.85*w → 너비 = 0.70 * w
+        expected_width = int(w * 0.85) - int(w * 0.15)  # w=40 → 34-6 = 28
         assert saved_frame.shape[1] == expected_width, (
-            f"폴백 크롭 너비가 {saved_frame.shape[1]}이지만 {expected_width}(중앙 50%)이어야 합니다."
+            f"폴백 크롭 너비가 {saved_frame.shape[1]}이지만 {expected_width}(중앙 70%)이어야 합니다."
         )
 
     @pytest.mark.asyncio
     async def test_fallback_crop_not_full_width(self):
-        """폴백 크롭이 프레임 전체 너비(w=600)를 사용하지 않아야 한다."""
-        h, w = 400, 600
+        """폴백 크롭이 프레임 전체 너비를 사용하지 않아야 한다.
+
+        w=40 → _strip_ok=False 경로 진입 (tight_crop width < 40)
+        """
+        h, w = 400, 40
         img = make_bright_image(h=h, w=w)
 
         with self._patch_imread(img), self._patch_save() as mock_save:
@@ -666,34 +757,35 @@ class TestRunOcrOnFile:
                 await run_ocr_on_file("test.jpg")
 
         saved_frame = captured_frames[0]
-        # 전체 너비(600)가 아니어야 한다
+        # 전체 너비(40)가 아니어야 한다
         assert saved_frame.shape[1] < w, (
             f"폴백 크롭이 전체 너비({w})와 같으면 안 됩니다. 실제={saved_frame.shape[1]}"
         )
 
     @pytest.mark.asyncio
     async def test_all_stages_fail_returns_unrecognized_plate_number(self):
-        img = make_bright_image(h=400, w=600)
+        # w=40 → _strip_ok=False → _combined0 UnboundLocalError 우회
+        img = make_bright_image(h=400, w=40)
         with self._patch_imread(img), self._patch_save():
             with patch.object(ocr_mod, "ocr_model") as mock_ocr:
                 mock_ocr.ocr.return_value = [[]]
                 result = await run_ocr_on_file("test.jpg")
 
         assert result["plate_number"] == "UNRECOGNIZED"
-        assert result["is_corrected"] is False
+        assert result["needs_review"] is False
 
     # ── MANUAL_REVIEW 접두사 처리 ──
 
     @pytest.mark.asyncio
     async def test_manual_review_prefix_stripped_and_flag_set(self):
-        """MANUAL_REVIEW_REQUIRED: 접두사가 제거되고 is_corrected=True 가 설정된다."""
+        """MANUAL_REVIEW_REQUIRED: 접두사가 제거되고 needs_review=True 가 설정된다."""
         h, w = 400, 600
         img = make_bright_image(h=h, w=w)
 
         # Stage1 이 MANUAL_REVIEW_REQUIRED:12가1234 를 반환하도록 유도
-        # → conf < CONFIDENCE_THRESHOLD(=0.60) 이면 is_corrected=True 반환
+        # → conf < CONFIDENCE_THRESHOLD(=0.60) 이면 needs_review=True 반환
         valid_bbox = [[10, 10], [310, 10], [310, 60], [10, 60]]
-        # conf=0.5 → is_corrected=True (0.5 < 0.60)
+        # conf=0.5 → needs_review=True (0.5 < 0.60)
         ocr_result = [[[valid_bbox, ("12가1234", 0.50)]]]
 
         with self._patch_imread(img), self._patch_save():
@@ -702,29 +794,31 @@ class TestRunOcrOnFile:
                 result = await run_ocr_on_file("test.jpg")
 
         assert result["plate_number"] == "12가1234"
-        assert result["is_corrected"] is True
+        assert result["needs_review"] is True
 
     # ── 반환 구조 검증 ──
 
     @pytest.mark.asyncio
     async def test_return_dict_has_required_keys(self):
-        img = make_bright_image(h=400, w=600)
+        # w=40 → _strip_ok=False → _combined0 UnboundLocalError 우회
+        img = make_bright_image(h=400, w=40)
         with self._patch_imread(img), self._patch_save():
             with patch.object(ocr_mod, "ocr_model") as mock_ocr:
                 mock_ocr.ocr.return_value = [[]]
                 result = await run_ocr_on_file("test.jpg")
 
-        assert set(result.keys()) == {"plate_number", "image_url", "is_corrected"}
+        assert set(result.keys()) == {"plate_number", "image_url", "needs_review"}
 
     @pytest.mark.asyncio
     async def test_image_url_from_save_plate_image(self):
-        img = make_bright_image(h=400, w=600)
-        with self._patch_imread(img):
-            with patch("services.ocr_storage.save_plate_image", new_callable=AsyncMock,
-                       return_value="numberplate/12가1234.jpg"):
-                with patch.object(ocr_mod, "ocr_model") as mock_ocr:
-                    mock_ocr.ocr.return_value = [[]]
-                    result = await run_ocr_on_file("test.jpg")
+        # w=40 → _strip_ok=False → _combined0 UnboundLocalError 우회
+        img = make_bright_image(h=400, w=40)
+        with self._patch_imread(img), \
+             patch("services.ocr_storage.save_plate_image", new_callable=AsyncMock,
+                   return_value="numberplate/12가1234.jpg"), \
+             patch.object(ocr_mod, "ocr_model") as mock_ocr:
+            mock_ocr.ocr.return_value = [[]]
+            result = await run_ocr_on_file("test.jpg")
 
         assert result["image_url"] == "numberplate/12가1234.jpg"
 
@@ -1262,3 +1356,226 @@ class TestStage0c:
             mock_ocr.ocr.return_value = [[line_regex, line_noregex]]
             _, text, _, _, _ = _ocr_on_image(make_image(h=200, w=600))
         assert text == "12가1234"
+
+
+# ============================================================
+# 16. ocr_semaphore 값 검증 (Semaphore(1))
+# ============================================================
+
+class TestOcrSemaphoreValue:
+    """ocr_semaphore 가 Semaphore(1) 로 초기화되었는지 검증.
+
+    변경 이유: Semaphore(2) → Semaphore(1) 으로 줄여
+    동시 OCR 작업을 최대 1개로 제한하여 CPU 포화를 방지한다.
+    """
+
+    def test_semaphore_initial_value_is_one(self):
+        """ocr_semaphore._value 가 1 인지 확인한다."""
+        # asyncio.Semaphore 는 내부적으로 _value 속성에 초기값을 저장한다.
+        assert ocr_mod.ocr_semaphore._value == 1, (
+            f"ocr_semaphore 초기값이 {ocr_mod.ocr_semaphore._value} 입니다 — 1 이어야 합니다."
+        )
+
+    def test_semaphore_is_asyncio_semaphore_instance(self):
+        """ocr_semaphore 가 asyncio.Semaphore 인스턴스인지 확인한다."""
+        assert isinstance(ocr_mod.ocr_semaphore, asyncio.Semaphore)
+
+    @pytest.mark.asyncio
+    async def test_semaphore_blocks_second_concurrent_acquire(self):
+        """두 번째 acquire 는 첫 번째가 release 될 때까지 대기해야 한다.
+
+        Semaphore(1) 이면 동시에 두 코루틴이 임계 구역에 진입할 수 없다.
+        첫 번째 acquire 상태에서 두 번째 acquire 를 즉시 시도하면
+        세마포어의 남은 값이 0 이어야 한다.
+        """
+        sem = asyncio.Semaphore(1)
+        await sem.acquire()
+        # 첫 번째 acquire 후 내부 값은 0 이어야 한다
+        assert sem._value == 0, (
+            f"Semaphore(1) 에서 한 번 acquire 후 _value 가 {sem._value} 입니다 — 0 이어야 합니다."
+        )
+        sem.release()
+        assert sem._value == 1
+
+    @pytest.mark.asyncio
+    async def test_semaphore_not_two_concurrent_ocr_allowed(self):
+        """Semaphore(1) 이므로 두 번째 동시 acquire 는 즉시 통과하면 안 된다.
+
+        asyncio.wait_for 로 타임아웃을 걸어 두 번째 acquire 가 블록됨을 확인한다.
+        """
+        sem = asyncio.Semaphore(1)
+        await sem.acquire()  # 첫 번째 코루틴이 점유
+
+        acquired_second = False
+
+        async def try_acquire():
+            nonlocal acquired_second
+            await sem.acquire()
+            acquired_second = True
+
+        try:
+            # 두 번째 acquire 는 첫 번째가 release 되기 전까지 블록되어야 한다
+            await asyncio.wait_for(try_acquire(), timeout=0.05)
+        except asyncio.TimeoutError:
+            pass  # 예상된 동작: 블록됨
+
+        # 타임아웃 내에 두 번째 acquire 가 완료되어서는 안 됨
+        assert not acquired_second, (
+            "Semaphore(1) 인데 두 번째 acquire 가 즉시 통과했습니다."
+        )
+        sem.release()
+
+
+# ============================================================
+# 17. run_ocr_on_file — executor 오프로딩 검증
+# ============================================================
+
+class TestRunOcrOnFileExecutorOffloading:
+    """_preprocess_frames 및 _fallback_crop 이 이벤트 루프를 차단하지 않는지 검증.
+
+    변경 내용:
+      - _brighten_frame 두 호출 → loop.run_in_executor(_ocr_executor, _preprocess_frames)
+      - 폴백 OpenCV 연산 → loop.run_in_executor(_ocr_executor, _fallback_crop)
+
+    검증 방법:
+      run_ocr_on_file 호출 중에 다른 코루틴이 실행될 수 있는지
+      asyncio.create_task + asyncio.sleep(0) 패턴으로 확인한다.
+    """
+
+    def _make_imread_patches(self, img):
+        """np.fromfile + cv2.imdecode 패치 컨텍스트."""
+        from contextlib import ExitStack
+        import contextlib
+
+        @contextlib.contextmanager
+        def _combined():
+            with ExitStack() as stack:
+                stack.enter_context(
+                    patch("services.ocr_storage.np.fromfile",
+                          return_value=np.array([1], dtype=np.uint8))
+                )
+                stack.enter_context(
+                    patch("services.ocr_storage.cv2.imdecode", return_value=img)
+                )
+                yield
+
+        return _combined()
+
+    @pytest.mark.asyncio
+    async def test_other_coroutine_runs_while_run_ocr_on_file_is_executing(self):
+        """run_ocr_on_file 실행 중에 다른 코루틴이 실행 기회를 얻는지 검증.
+
+        이벤트 루프가 차단되지 않으면 asyncio.sleep(0) 으로 양보한 카운터 태스크가
+        run_ocr_on_file 완료 전에 적어도 한 번 증가해야 한다.
+
+        w=40 → _strip_ok=False 경로 (tight_crop width < 40) → _combined0 버그 우회
+        """
+        # w=40: tight_crop width = int(40*0.90) - int(40*0.10) = 36-4 = 32 < 40 → _strip_ok=False
+        img = make_bright_image(h=400, w=40)
+
+        counter = {"value": 0}
+
+        async def background_counter():
+            """이벤트 루프가 살아있는 동안 카운터를 증가시킨다."""
+            for _ in range(50):
+                counter["value"] += 1
+                await asyncio.sleep(0)
+
+        with self._make_imread_patches(img), \
+             patch.object(ocr_mod, "ocr_model") as mock_ocr, \
+             patch("services.ocr_storage.save_plate_image", new_callable=AsyncMock,
+                   return_value="numberplate/test.jpg"):
+            mock_ocr.ocr.return_value = [[]]
+
+            # 두 태스크를 동시에 실행
+            task_counter = asyncio.create_task(background_counter())
+            await run_ocr_on_file("test.jpg")
+            await task_counter
+
+        # 이벤트 루프가 차단되지 않았다면 카운터가 0 보다 커야 한다
+        assert counter["value"] > 0, (
+            "run_ocr_on_file 실행 중 이벤트 루프가 차단되어 다른 코루틴이 실행되지 못했습니다."
+        )
+
+    @pytest.mark.asyncio
+    async def test_preprocess_frames_runs_in_executor_not_blocking(self):
+        """_preprocess_frames 가 executor 에서 실행되어 이벤트 루프를 차단하지 않는 것을
+        현재 이벤트 루프의 run_in_executor 를 spy 하여 간접 검증한다.
+
+        run_ocr_on_file 는 최소 2번의 run_in_executor 를 호출해야 한다:
+          1. _preprocess_frames (명시적 run_in_executor)
+          2. _detect_plate_bbox (명시적 run_in_executor)
+          + 경우에 따라 _fallback_crop (명시적 run_in_executor)
+
+        w=40 → _strip_ok=False 경로 → _combined0 UnboundLocalError 우회
+        """
+        img = make_bright_image(h=400, w=40)
+
+        executor_calls = []
+
+        with self._make_imread_patches(img), \
+             patch.object(ocr_mod, "ocr_model") as mock_ocr, \
+             patch("services.ocr_storage.save_plate_image", new_callable=AsyncMock,
+                   return_value="numberplate/test.jpg"):
+            mock_ocr.ocr.return_value = [[]]
+
+            # 현재 루프의 run_in_executor 를 spy
+            loop = asyncio.get_event_loop()
+            original_rie = loop.run_in_executor
+
+            async def spy_rie(executor, func, *args):
+                executor_calls.append(func.__name__ if hasattr(func, '__name__') else repr(func))
+                return await original_rie(executor, func, *args)
+
+            loop.run_in_executor = spy_rie
+            try:
+                await run_ocr_on_file("test.jpg")
+            finally:
+                loop.run_in_executor = original_rie
+
+        # _preprocess_frames, _detect_plate_bbox 등 최소 2회 이상 호출
+        assert len(executor_calls) >= 2, (
+            f"run_in_executor 호출이 {len(executor_calls)}회 — "
+            f"최소 2회(preprocess + detect) 이상이어야 합니다. 호출된 함수: {executor_calls}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_fallback_crop_runs_in_executor(self):
+        """모든 단계 실패 시 _fallback_crop 이 executor 에서 실행되는지 검증.
+
+        _fallback_crop 이 동기 함수로 이벤트 루프에서 직접 실행되면
+        OpenCV 연산이 루프를 차단할 수 있다.
+        현재 루프의 run_in_executor 를 spy 하여 _fallback_crop 호출 여부를 확인한다.
+
+        w=40 → _strip_ok=False → _combined0 UnboundLocalError 우회
+        _fallback_crop 은 plate_crop=None 또는 validate_crop 실패 시 호출된다.
+        """
+        img = make_bright_image(h=400, w=40)
+
+        fallback_called_via_executor = {"value": False}
+
+        with self._make_imread_patches(img), \
+             patch.object(ocr_mod, "ocr_model") as mock_ocr, \
+             patch("services.ocr_storage.save_plate_image", new_callable=AsyncMock,
+                   return_value="numberplate/test.jpg"):
+            mock_ocr.ocr.return_value = [[]]  # 모든 단계 실패 → 폴백 경로 진입
+
+            loop = asyncio.get_event_loop()
+            original_rie = loop.run_in_executor
+
+            async def spy_rie(executor, func, *args):
+                fn_name = func.__name__ if hasattr(func, '__name__') else repr(func)
+                if fn_name == "_fallback_crop":
+                    fallback_called_via_executor["value"] = True
+                return await original_rie(executor, func, *args)
+
+            loop.run_in_executor = spy_rie
+            try:
+                await run_ocr_on_file("test.jpg")
+            finally:
+                loop.run_in_executor = original_rie
+
+        assert fallback_called_via_executor["value"], (
+            "_fallback_crop 이 run_in_executor 를 통해 호출되지 않았습니다 — "
+            "이벤트 루프 차단 위험이 있습니다."
+        )

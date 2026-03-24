@@ -104,7 +104,7 @@ CREATE TABLE violation_log (
 -- [역할] 관리자의 과태료 부과 승인 및 번호판 수동 수정/반려 내역을 관리하기 위함.
 -- =========================================================================
 ALTER TABLE violation_log ADD COLUMN fine_status VARCHAR(20) DEFAULT 'UNPROCESSED';
-ALTER TABLE violation_log ADD COLUMN is_corrected BOOLEAN DEFAULT FALSE;
+ALTER TABLE violation_log ADD COLUMN needs_review BOOLEAN DEFAULT FALSE;
 
 /*
 [추가된 컬럼 세부 설명 및 코드 의미]
@@ -112,10 +112,13 @@ ALTER TABLE violation_log ADD COLUMN is_corrected BOOLEAN DEFAULT FALSE;
   : 관리자의 과태료 처리 상태를 저장함.
   * 기본값은 'UNPROCESSED(미처리)'이며, 관리자 화면에서 버튼 클릭 시 'APPROVED(승인/부과)','REJECTED(반려)' 등으로 변경됨.
 
-- is_corrected (BOOLEAN DEFAULT FALSE)
+- needs_review (BOOLEAN DEFAULT FALSE)
   : AI가 인식한 번호판(plate_number)을 관리자가 수동으로 수정했는지 여부를 기록함.
   * 수정 전은 FALSE(거짓)이며, 관리자가 직접 타이핑하여 수정하면 TRUE(참)로 값이 바뀜.
 */
+
+-- 컬럼명 리네이밍 마이그레이션
+ALTER TABLE violation_log RENAME COLUMN is_corrected TO needs_review;
 
 -- =========================================================================
 -- 4. 예지보전 센서 데이터 테이블 (sensor_log)
@@ -315,7 +318,7 @@ CREATE TABLE maintenance_log (
 ③ 단속 내역 관리 화면
   - 위반 차량 리스트 노출: violation_log 데이터를 표(그리드) 형태로 쫙 뿌려줌.
   - 과태료 부과 및 번호판 수정: 관리자가 화면에서 [승인] 버튼이나 [수정] 버튼을 누르면, 
-  백엔드에서 violation_log의 fine_status(처리 상태)와 is_corrected(수정 여부) 값을 UPDATE 함.
+  백엔드에서 violation_log의 fine_status(처리 상태)와 needs_review(수정 여부) 값을 UPDATE 함.
 
 ④ 실비 예지보전 화면
   - 기기 상태 조회: equipment 테이블을 불러와 카메라와 제어기 목록을 띄움.

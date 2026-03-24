@@ -8,7 +8,7 @@ public class ViolationDTO {
     private String imageUrl;
     private String srcImageUrl;
     private String fineStatus;   // DB: UNPROCESSED / APPROVED / REJECTED
-    private Boolean isCorrected;
+    private Boolean needsReview;
     private Double speedKmh;
     private String detectedAt;
 
@@ -42,8 +42,8 @@ public class ViolationDTO {
     public String getFineStatus() { return fineStatus; }
     public void setFineStatus(String fineStatus) { this.fineStatus = fineStatus; }
 
-    public Boolean getIsCorrected() { return isCorrected; }
-    public void setIsCorrected(Boolean isCorrected) { this.isCorrected = isCorrected; }
+    public Boolean getNeedsReview() { return needsReview; }
+    public void setNeedsReview(Boolean needsReview) { this.needsReview = needsReview; }
 
     public Double getSpeedKmh() { return speedKmh; }
     public void setSpeedKmh(Double speedKmh) { this.speedKmh = speedKmh; }
