@@ -8,13 +8,28 @@
     <!-- 지도 섹션 -->
     <div class="map-card">
       <div ref="mapContainer" class="map-container"></div>
+      <!-- 방향 토글 버튼 (지도 좌하단) -->
+      <div class="direction-toggle">
+        <button
+          :class="['dir-btn', { active: directionFilter === 'ALL' }]"
+          @click="setDirection('ALL')"
+        >전체</button>
+        <button
+          :class="['dir-btn', { active: directionFilter === 'UP' }]"
+          @click="setDirection('UP')"
+        >상행 ↑</button>
+        <button
+          :class="['dir-btn', { active: directionFilter === 'DOWN' }]"
+          @click="setDirection('DOWN')"
+        >하행 ↓</button>
+      </div>
     </div>
 
     <!-- 위젯 그리드 -->
     <div class="widget-grid">
 
-      <!-- 위젯 1: 누적 교통량 (미완성) -->
-      <div class="widget widget-pending" @click="router.push('/statistics')">
+      <!-- 위젯 1: 누적 교통량 -->
+      <div class="widget widget-traffic" @click="router.push('/statistics')">
         <div class="widget-header">
           <div class="widget-icon-wrap icon-blue">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -23,13 +38,37 @@
           </div>
           <span class="widget-title">누적 교통량</span>
         </div>
-        <div class="widget-body pending-body">
-          <div class="pending-graph">
-            <svg width="100%" height="60" viewBox="0 0 200 60" preserveAspectRatio="none">
-              <polyline points="0,50 40,35 80,40 120,20 160,28 200,15" fill="none" stroke="#CBD5E1" stroke-width="2" stroke-dasharray="4 3"/>
-            </svg>
-          </div>
-          <p class="pending-text">데이터 준비 중</p>
+        <div class="widget-body traffic-body">
+          <template v-if="trafficLoading">
+            <div class="skeleton-count"></div>
+            <div class="skeleton-sub"></div>
+          </template>
+          <template v-else>
+            <div class="traffic-count">
+              <span class="count-number">{{ trafficSummary.todayCount ?? '--' }}</span>
+              <span class="count-unit">건</span>
+            </div>
+            <div class="traffic-change" :class="changeClass">
+              <span class="change-arrow">{{ changeArrow }}</span>
+              <span class="change-val">{{ Math.abs(trafficSummary.changePercent ?? 0).toFixed(1) }}%</span>
+              <span class="change-label">전일 대비</span>
+            </div>
+            <!-- SVG 미니 바 그래프 (7일) -->
+            <div class="mini-graph">
+              <svg width="100%" height="40" :viewBox="`0 0 ${(trafficSummary.weeklyData?.length || 7) * 20} 40`" preserveAspectRatio="none">
+                <rect
+                  v-for="(val, i) in (trafficSummary.weeklyData || [])"
+                  :key="i"
+                  :x="i * 20 + 2"
+                  :y="40 - (maxWeekly > 0 ? (val / maxWeekly) * 36 : 0)"
+                  width="16"
+                  :height="maxWeekly > 0 ? (val / maxWeekly) * 36 : 0"
+                  :fill="i === 6 ? '#1A6DCC' : '#CBD5E1'"
+                  rx="3"
+                />
+              </svg>
+            </div>
+          </template>
         </div>
         <div class="widget-footer">
           <button class="widget-link-btn" @click.stop="router.push('/statistics')">
@@ -39,8 +78,8 @@
         </div>
       </div>
 
-      <!-- 위젯 2: 전체 CCTV 현황 (미완성) -->
-      <div class="widget widget-pending" @click="router.push('/predictive')">
+      <!-- 위젯 2: 전체 CCTV 현황 -->
+      <div class="widget widget-cctv-status" @click="router.push('/predictive')">
         <div class="widget-header">
           <div class="widget-icon-wrap icon-purple">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -49,19 +88,28 @@
           </div>
           <span class="widget-title">전체 CCTV 현황</span>
         </div>
-        <div class="widget-body pending-body">
-          <div class="cctv-status-placeholder">
-            <div class="status-row">
-              <span class="status-dot dot-gray"></span><span class="status-label">정상 운영</span><span class="status-val">--</span>
+        <div class="widget-body cctv-status-body">
+          <template v-if="cctvStatusLoading">
+            <div class="skeleton-count"></div>
+          </template>
+          <template v-else>
+            <div class="cctv-total">
+              <span class="count-number">{{ cctvStatus.totalCount ?? '--' }}</span>
+              <span class="count-unit">대</span>
             </div>
-            <div class="status-row">
-              <span class="status-dot dot-gray"></span><span class="status-label">점검 중</span><span class="status-val">--</span>
+            <div class="cctv-status-rows">
+              <div class="status-row">
+                <span class="status-dot" style="background:#22C55E"></span>
+                <span class="status-label">정상 운영</span>
+                <span class="status-val">{{ cctvStatus.activeCount ?? '--' }}</span>
+              </div>
+              <div class="status-row">
+                <span class="status-dot" style="background:#EF4444"></span>
+                <span class="status-label">비활성</span>
+                <span class="status-val">{{ cctvStatus.inactiveCount ?? '--' }}</span>
+              </div>
             </div>
-            <div class="status-row">
-              <span class="status-dot dot-gray"></span><span class="status-label">통신 오류</span><span class="status-val">--</span>
-            </div>
-          </div>
-          <p class="pending-text">데이터 준비 중</p>
+          </template>
         </div>
         <div class="widget-footer">
           <button class="widget-link-btn" @click.stop="router.push('/predictive')">
@@ -229,6 +277,29 @@ const cctvList = ref([])
 const violation = ref({})
 const violationLoading = ref(true)
 
+// ─── 누적 교통량 ──────────────────────────────────────────────────────────────
+const trafficSummary = ref({})
+const trafficLoading = ref(true)
+
+// ─── CCTV 현황 ────────────────────────────────────────────────────────────────
+const cctvStatus = ref({})
+const cctvStatusLoading = ref(true)
+
+// ─── 혼잡도 폴리라인 ──────────────────────────────────────────────────────────
+let congestionPolylines = []
+let congestionTimer = null
+let routeGeometryCache = {}   // "fromId-toId" → [[lat,lng], ...] 캐시
+
+// ─── 방향 필터 ────────────────────────────────────────────────────────────────
+const directionFilter = ref('ALL')  // 'ALL' | 'UP' | 'DOWN'
+
+const CONGESTION_COLORS = {
+  SMOOTH: '#22C55E',
+  SLOW: '#F59E0B',
+  CONGESTED: '#EF4444',
+  UNKNOWN: '#94A3B8'
+}
+
 // ─── 날씨 ─────────────────────────────────────────────────────────────────────
 const weather = ref({})
 const weatherLoading = ref(true)
@@ -244,6 +315,22 @@ const streamModal = ref({
 })
 const modalVideo = ref(null)
 let modalHls = null
+
+// ─── 누적 교통량 computed ─────────────────────────────────────────────────────
+const maxWeekly = computed(() => {
+  const data = trafficSummary.value.weeklyData || []
+  return data.length ? Math.max(...data) : 1
+})
+
+const changeArrow = computed(() => {
+  const p = trafficSummary.value.changePercent ?? 0
+  return p > 0 ? '▲' : p < 0 ? '▼' : '─'
+})
+
+const changeClass = computed(() => {
+  const p = trafficSummary.value.changePercent ?? 0
+  return p > 0 ? 'change-up' : p < 0 ? 'change-down' : 'change-flat'
+})
 
 // ─── 날씨 아이콘 경로 계산 ────────────────────────────────────────────────────
 const weatherIconPath = computed(() => {
@@ -276,6 +363,21 @@ const initMap = () => {
   }).addTo(map)
 
   map.setView([37.755, 126.440], 12)
+
+  // 혼잡도 범례
+  const legend = L.control({ position: 'bottomright' })
+  legend.onAdd = () => {
+    const div = L.DomUtil.create('div', 'leaflet-congestion-legend')
+    div.innerHTML = `
+      <div class="legend-title">혼잡도</div>
+      <div class="legend-item"><span class="legend-line" style="background:#22C55E"></span>원활</div>
+      <div class="legend-item"><span class="legend-line" style="background:#F59E0B"></span>서행</div>
+      <div class="legend-item"><span class="legend-line" style="background:#EF4444"></span>혼잡</div>
+      <div class="legend-item"><span class="legend-line" style="background:#94A3B8"></span>미확인</div>
+    `
+    return div
+  }
+  legend.addTo(map)
 }
 
 // ─── CCTV 마커 추가 ───────────────────────────────────────────────────────────
@@ -397,6 +499,49 @@ const onKeydown = (e) => {
   if (e.key === 'Escape') closeModal()
 }
 
+// ─── OSRM 도로 경로 조회 ───────────────────────────────────────────────────
+const fetchRouteGeometry = async (fromLat, fromLng, toLat, toLng, cacheKey) => {
+  if (routeGeometryCache[cacheKey]) return routeGeometryCache[cacheKey]
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/${fromLng},${fromLat};${toLng},${toLat}?overview=full&geometries=geojson`
+    const res = await fetch(url)
+    const data = await res.json()
+    if (data.routes && data.routes[0]) {
+      // GeoJSON coordinates는 [lng, lat] 순서 → Leaflet용 [lat, lng]으로 변환
+      const coords = data.routes[0].geometry.coordinates.map(([lng, lat]) => [lat, lng])
+      routeGeometryCache[cacheKey] = coords
+      return coords
+    }
+  } catch {
+    // OSRM 실패 시 직선 fallback
+  }
+  return [[fromLat, fromLng], [toLat, toLng]]
+}
+
+// ─── 혼잡도 폴리라인 그리기 ───────────────────────────────────────────────────
+const drawCongestionPolylines = async (segments) => {
+  // 기존 폴리라인 제거
+  congestionPolylines.forEach(p => map.removeLayer(p))
+  congestionPolylines = []
+
+  // 모든 구간의 경로를 병렬로 조회
+  await Promise.all(segments.map(async (seg) => {
+    const cacheKey = `${seg.fromId}-${seg.toId}`
+    const color = CONGESTION_COLORS[seg.congestionLevel] || CONGESTION_COLORS.UNKNOWN
+    const coords = await fetchRouteGeometry(
+      seg.fromLat, seg.fromLng,
+      seg.toLat,   seg.toLng,
+      cacheKey
+    )
+    const pl = L.polyline(coords, {
+      color,
+      weight: 6,
+      opacity: 0.85
+    }).addTo(map)
+    congestionPolylines.push(pl)
+  }))
+}
+
 // ─── API: 교차로 목록 ─────────────────────────────────────────────────────────
 const fetchIntersections = async () => {
   try {
@@ -435,6 +580,51 @@ const fetchWeather = async () => {
   }
 }
 
+// ─── API: 누적 교통량 ─────────────────────────────────────────────────────────
+const fetchTrafficSummary = async () => {
+  trafficLoading.value = true
+  try {
+    const res = await api.get('/dashboard/traffic-summary')
+    trafficSummary.value = res.data?.data || res.data || {}
+  } catch {
+    trafficSummary.value = {}
+  } finally {
+    trafficLoading.value = false
+  }
+}
+
+// ─── API: CCTV 현황 ───────────────────────────────────────────────────────────
+const fetchCctvStatus = async () => {
+  cctvStatusLoading.value = true
+  try {
+    const res = await api.get('/dashboard/cctv-status')
+    cctvStatus.value = res.data?.data || res.data || {}
+  } catch {
+    cctvStatus.value = {}
+  } finally {
+    cctvStatusLoading.value = false
+  }
+}
+
+// ─── API: 도로 혼잡도 ─────────────────────────────────────────────────────────
+const fetchRoadCongestion = async () => {
+  if (!map) return
+  try {
+    const dirParam = directionFilter.value !== 'ALL' ? `?direction=${directionFilter.value}` : ''
+    const res = await api.get(`/dashboard/road-congestion${dirParam}`)
+    const segments = res.data?.data || res.data || []
+    await drawCongestionPolylines(segments)
+  } catch {
+    // 혼잡도 로드 실패 시 기존 폴리라인 유지
+  }
+}
+
+// ─── 방향 변경 핸들러 ─────────────────────────────────────────────────────────
+const setDirection = async (dir) => {
+  directionFilter.value = dir
+  await fetchRoadCongestion()
+}
+
 // ─── 날씨 링크 ────────────────────────────────────────────────────────────────
 const openWeather = () => {
   window.open('https://weather.naver.com/map/09110615', '_blank')
@@ -449,11 +639,17 @@ onMounted(async () => {
   await Promise.all([
     fetchIntersections(),
     fetchViolations(),
-    fetchWeather()
+    fetchWeather(),
+    fetchTrafficSummary(),
+    fetchCctvStatus(),
+    fetchRoadCongestion()
   ])
+
+  congestionTimer = setInterval(fetchRoadCongestion, 30000)
 })
 
 onUnmounted(() => {
+  if (congestionTimer) clearInterval(congestionTimer)
   if (modalHls) { modalHls.destroy(); modalHls = null }
   if (map) { map.remove(); map = null }
   document.removeEventListener('keydown', onKeydown)
@@ -487,6 +683,41 @@ onUnmounted(() => {
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
   overflow: hidden;
   margin-bottom: 20px;
+  position: relative;
+}
+
+/* ─── 방향 토글 버튼 ────────────────────────────────────────────────────────── */
+.direction-toggle {
+  position: absolute;
+  bottom: 28px;
+  left: 12px;
+  z-index: 1000;
+  display: flex;
+  gap: 4px;
+}
+
+.dir-btn {
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid #475569;
+  background: rgba(15, 23, 42, 0.85);
+  color: #CBD5E1;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: inherit;
+}
+
+.dir-btn:hover {
+  background: rgba(30, 41, 59, 0.95);
+  color: #F1F5F9;
+}
+
+.dir-btn.active {
+  background: #3B82F6;
+  border-color: #3B82F6;
+  color: #fff;
+  font-weight: 600;
 }
 
 .map-container {
@@ -910,6 +1141,97 @@ onUnmounted(() => {
 
 .stream-error {
   color: rgba(239, 68, 68, 0.8);
+}
+
+/* ─── 누적 교통량 위젯 ──────────────────────────────────────────────────────── */
+.widget-traffic { background: #fff; }
+
+.traffic-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.traffic-count {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.traffic-change {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.change-up   { color: #EF4444; }
+.change-down { color: #22C55E; }
+.change-flat { color: #94A3B8; }
+
+.change-arrow { font-size: 12px; }
+.change-val   { font-weight: 700; }
+.change-label { color: #94A3B8; font-weight: 400; font-size: 12px; }
+
+.mini-graph { width: 100%; margin-top: 4px; }
+
+/* ─── CCTV 현황 위젯 ────────────────────────────────────────────────────────── */
+.widget-cctv-status { background: #fff; }
+
+.cctv-status-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.cctv-total {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.cctv-status-rows {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cctv-status-rows .status-row { opacity: 1; }
+
+/* ─── 범례 (Leaflet global) ─────────────────────────────────────────────────── */
+:global(.leaflet-congestion-legend) {
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 10px;
+  padding: 10px 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+}
+
+:global(.legend-title) {
+  font-weight: 700;
+  color: #1A1A2E;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+:global(.legend-item) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #374151;
+  margin-bottom: 4px;
+}
+
+:global(.legend-line) {
+  display: inline-block;
+  width: 20px;
+  height: 4px;
+  border-radius: 2px;
 }
 
 /* ─── 반응형 ────────────────────────────────────────────────────────────────── */
