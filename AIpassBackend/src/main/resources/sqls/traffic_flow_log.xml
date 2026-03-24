@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.aipass.dao.TrafficFlowLogMapper">
+
+    <insert id="insertBatch" parameterType="list">
+        INSERT INTO traffic_flow_log (link_id, road_name, speed, congestion_level,
+                                      direction, route_no, collected_at)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.linkId}, #{item.roadName}, #{item.speed}, #{item.congestionLevel},
+             #{item.direction}, #{item.routeNo}, #{item.collectedAt})
+        </foreach>
+    </insert>
+
+    <select id="findRecent" parameterType="int" resultType="com.aipass.dto.TrafficFlowLogDTO">
+        SELECT flow_id, link_id, road_name, speed, congestion_level,
+               direction, route_no, collected_at, created_at
+        FROM traffic_flow_log
+        ORDER BY collected_at DESC
+        LIMIT #{limit}
+    </select>
+
+</mapper>

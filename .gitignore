@@ -23,3 +23,5 @@ AIpassBackend/src/main/resources/application.properties
 .claude/
 TODO.md
 docs
+research.md
+doc/스케줄러 DB 설명서.txt
