@@ -17,11 +17,7 @@
         <img :src="sTrafficLogo" alt="S-Traffic" class="logo-img" />
       </div>
       <div class="footer-brand">
-        <svg class="footer-logo-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="2" y1="12" x2="22" y2="12" /><line x1="12" y1="2" x2="12" y2="22" />
-          <path d="M20 16c-4 0-6-2-6-6s2-6 6-6" /><path d="M4 8c4 0 6 2 6 6s-2 6-6 6" />
-        </svg>
-        <span>AI-Pass</span>
+        <img :src="aipassLogo" alt="AI-PASS" class="footer-logo-img" />
       </div>
     </div>
     </div>
@@ -34,6 +30,7 @@ import kdtLogo from '../assets/logos/KDT.png'
 import itsKoreaLogo from '../assets/logos/its-korea.png'
 import mbcLogo from '../assets/logos/mbc-academy.png'
 import sTrafficLogo from '../assets/logos/s-traffic.png'
+import aipassLogo from '../assets/logos/AI-PASS_LOGO.png'
 </script>
 
 <style scoped>
@@ -102,9 +99,8 @@ import sTrafficLogo from '../assets/logos/s-traffic.png'
   color: #1A1A2E;
 }
 
-.footer-logo-icon {
-  color: #1A6DCC;
-  width: 20px;
-  height: 20px;
+.footer-logo-img {
+  height: 28px;
+  object-fit: contain;
 }
 </style>

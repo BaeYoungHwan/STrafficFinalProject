@@ -186,12 +186,13 @@
               <div class="stream-error">스트림을 불러올 수 없습니다.</div>
             </template>
             <template v-else>
-              <img
-                :src="streamModal.url"
+              <video
+                ref="modalVideo"
                 class="stream-img"
-                alt="CCTV 스트림"
-                @error="streamModal.error = true"
-              />
+                autoplay
+                muted
+                playsinline
+              ></video>
             </template>
           </div>
         </div>
@@ -206,6 +207,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
+import Hls from 'hls.js'
 import api from '../api'
 
 // ─── Leaflet 기본 마커 경로 오류 방지 ─────────────────────────────────────────
@@ -219,6 +221,9 @@ let map = null
 
 // ─── 교차로 데이터 ────────────────────────────────────────────────────────────
 const intersections = ref([])
+
+// ─── CCTV 목록 (lat/lng 매칭용) ───────────────────────────────────────────────
+const cctvList = ref([])
 
 // ─── 단속 건수 ────────────────────────────────────────────────────────────────
 const violation = ref({})
@@ -237,6 +242,8 @@ const streamModal = ref({
   loading: false,
   error: false
 })
+const modalVideo = ref(null)
+let modalHls = null
 
 // ─── 날씨 아이콘 경로 계산 ────────────────────────────────────────────────────
 const weatherIconPath = computed(() => {
@@ -268,7 +275,7 @@ const initMap = () => {
     maxZoom: 19
   }).addTo(map)
 
-  map.fitBounds([[37.720, 126.350], [37.790, 126.530]])
+  map.setView([37.755, 126.440], 12)
 }
 
 // ─── CCTV 마커 추가 ───────────────────────────────────────────────────────────
@@ -282,6 +289,8 @@ const addMarkers = () => {
     popupAnchor: [0, -34]
   })
 
+  const markerList = []
+
   intersections.value.forEach(intersection => {
     if (!intersection.latitude || !intersection.longitude) return
 
@@ -289,6 +298,7 @@ const addMarkers = () => {
       [intersection.latitude, intersection.longitude],
       { icon: cctvIcon }
     ).addTo(map)
+    markerList.push(marker)
 
     // 호버 팝업
     marker.bindPopup(`<strong>${intersection.name}</strong>`, {
@@ -302,10 +312,32 @@ const addMarkers = () => {
     // 클릭 시 스트림 모달
     marker.on('click', () => openModal(intersection))
   })
+
+  // 마커 중심점 기준 zoom 13 고정
+  if (markerList.length > 0) {
+    const group = L.featureGroup(markerList)
+    const center = group.getBounds().getCenter()
+    map.setView(center, 13)
+  }
+}
+
+// ─── 가장 가까운 CCTV 찾기 ───────────────────────────────────────────────────
+const findNearestCctv = (lat, lng) => {
+  if (!cctvList.value.length) return null
+  let nearest = null
+  let minDist = Infinity
+  cctvList.value.forEach(cctv => {
+    if (!cctv.latitude || !cctv.longitude) return
+    const d = Math.pow(cctv.latitude - lat, 2) + Math.pow(cctv.longitude - lng, 2)
+    if (d < minDist) { minDist = d; nearest = cctv }
+  })
+  return nearest
 }
 
 // ─── 모달 열기 ────────────────────────────────────────────────────────────────
 const openModal = async (intersection) => {
+  if (modalHls) { modalHls.destroy(); modalHls = null }
+
   streamModal.value = {
     open: true,
     name: intersection.name || 'CCTV',
@@ -315,20 +347,46 @@ const openModal = async (intersection) => {
   }
 
   try {
-    const res = await api.get('/cctv/ai-target')
-    const data = res.data?.data || res.data
-    const url = data?.streamUrl || data?.stream_url || ''
+    // CCTV 목록이 없으면 먼저 로드
+    if (!cctvList.value.length) {
+      const res = await api.get('/cctv/list')
+      cctvList.value = res.data?.data || res.data || []
+    }
+
+    const nearest = findNearestCctv(intersection.latitude, intersection.longitude)
+    const url = nearest?.streamUrl || ''
+
+    if (!url) {
+      streamModal.value.error = true
+      streamModal.value.loading = false
+      return
+    }
     streamModal.value.url = url
-    streamModal.value.error = !url
+    streamModal.value.loading = false
+
+    await nextTick()
+    const video = modalVideo.value
+    if (!video) return
+
+    if (Hls.isSupported()) {
+      modalHls = new Hls({ enableWorker: false })
+      modalHls.loadSource(url)
+      modalHls.attachMedia(video)
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = url
+    } else {
+      streamModal.value.error = true
+    }
   } catch {
     streamModal.value.error = true
-  } finally {
     streamModal.value.loading = false
   }
 }
 
 // ─── 모달 닫기 ────────────────────────────────────────────────────────────────
 const closeModal = () => {
+  if (modalHls) { modalHls.destroy(); modalHls = null }
+  if (modalVideo.value) modalVideo.value.src = ''
   streamModal.value.open = false
   streamModal.value.url = ''
   streamModal.value.error = false
@@ -396,10 +454,8 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  if (map) {
-    map.remove()
-    map = null
-  }
+  if (modalHls) { modalHls.destroy(); modalHls = null }
+  if (map) { map.remove(); map = null }
   document.removeEventListener('keydown', onKeydown)
 })
 </script>
