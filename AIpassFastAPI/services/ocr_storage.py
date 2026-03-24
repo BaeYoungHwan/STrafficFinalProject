@@ -84,13 +84,24 @@ def _preprocess_for_ocr(img: np.ndarray, binarize: bool = False) -> np.ndarray:
 
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
+    tile_w = max(4, img.shape[1] // 8)
+    tile_h = max(4, img.shape[0] // 4)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(tile_w, tile_h))
     enhanced = clahe.apply(gray)
 
+    # Unsharp Masking: 획 경계 강화 → PaddleOCR confidence 향상
+    _gaussian = cv2.GaussianBlur(enhanced, (0, 0), 1.5)
+    enhanced = cv2.addWeighted(enhanced, 1.8, _gaussian, -0.8, 0)
+
     if binarize:
-        # OTSU 이진화 + 팽창: 크롭된 번호판 최종 인식 시에만 사용
-        _, enhanced = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        kernel = np.ones((2, 2), np.uint8)
+        # Adaptive Gaussian Thresholding: 불균일 조명에도 한글 획 보존
+        block = max(11, (enhanced.shape[0] // 4) | 1)  # 홀수 강제, 높이 비례
+        enhanced = cv2.adaptiveThreshold(
+            enhanced, 255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY, block, 8
+        )
+        kernel = np.ones((1, 1), np.uint8)  # 커널 축소 → 한글 획 보존
         enhanced = cv2.dilate(enhanced, kernel, iterations=1)
 
     return cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
@@ -393,6 +404,24 @@ async def run_ocr_on_file(src_path: str) -> dict:
         _x1, _x2 = int(img_w * 0.10), int(img_w * 0.90)
         _tight_crop = _s[_r1:_r2, _x1:_x2]
 
+        # ── Stage 0c: 전처리 없는 Lanczos 2x 컬러 직접 OCR (과전처리 회피 경로) ──
+        if _tight_crop.size > 0 and _tight_crop.shape[0] >= 10 and _tight_crop.shape[1] >= 40:
+            _color_2x = cv2.resize(_tight_crop, None, fx=2.0, fy=2.0,
+                                    interpolation=cv2.INTER_LANCZOS4)
+            _result_0c = ocr_model.ocr(_color_2x)
+            if _result_0c and _result_0c[0]:
+                _texts_0c = []
+                _confs_0c = []
+                for _l in _result_0c[0]:
+                    if _l and len(_l) >= 2 and isinstance(_l[1], (list, tuple)):
+                        _texts_0c.append(re.sub(r'[^0-9가-힣]', '', _l[1][0]))
+                        _confs_0c.append(_l[1][1])
+                _combined_0c = "".join(_texts_0c)
+                if PLATE_PATTERN.match(_combined_0c):
+                    _conf_0c = sum(_confs_0c) / len(_confs_0c) if _confs_0c else 0.0
+                    logger.info(f"[OCR Stage0c] 컬러 Lanczos 인식: {_combined_0c} (conf={_conf_0c:.3f})")
+                    return _tight_crop, _combined_0c, _conf_0c < CONFIDENCE_THRESHOLD
+
         # ※ _tight_crop은 가로로 긴 탐색 스트립 → 비율 검증(ratio≤9.0) 제외, 크기 검증만 수행
         _strip_ok = _tight_crop.size > 0 and _tight_crop.shape[0] >= 10 and _tight_crop.shape[1] >= 40
         if _strip_ok:
@@ -531,6 +560,13 @@ async def run_ocr_on_file(src_path: str) -> dict:
         is_corrected = True
     else:
         plate_text = plate_text_raw
+
+    # 한글 없는 결과(숫자만) 저장 차단 → UNRECOGNIZED 처리
+    if plate_text and not re.search(r'[가-힣]', plate_text) \
+            and not plate_text.startswith("UNRECOGNIZED"):
+        logger.warning(f"[OCR] 한글 없는 결과 차단: {plate_text} → UNRECOGNIZED 처리")
+        plate_text = f"UNRECOGNIZED_{uuid.uuid4().hex[:8]}"
+        is_corrected = False
 
     if plate_crop is not None and _validate_crop(plate_crop):
         save_frame = plate_crop
