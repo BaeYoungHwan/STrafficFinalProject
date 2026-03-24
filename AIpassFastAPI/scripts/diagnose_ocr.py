@@ -86,7 +86,7 @@ async def run_carnumber_diagnosis():
             result = await run_ocr_on_file(fpath)
             plate   = result["plate_number"]
             img_url = result["image_url"]
-            is_cor  = result["is_corrected"]
+            is_cor  = result["needs_review"]
             has_kor = bool(HAN.search(plate))
             is_valid = bool(PLATE_PATTERN.match(plate))
             tag = "PASS" if (has_kor and is_valid) else "FAIL"

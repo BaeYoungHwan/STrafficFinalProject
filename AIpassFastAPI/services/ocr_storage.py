@@ -16,14 +16,14 @@ logger = logging.getLogger(__name__)
 # max_workers=2: cpu_threads=2와 조합 시 동시 최대 4코어 사용 → YOLO 코어 확보
 _ocr_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="paddle-ocr")
 
-# 동시 OCR 작업 수 제한 (스레드풀 max_workers와 일치)
-ocr_semaphore = asyncio.Semaphore(2)
+# 동시 OCR 작업 수 제한 — CPU 포화 방지
+ocr_semaphore = asyncio.Semaphore(1)  # 동시 OCR 1개 제한 — CPU 포화 방지
 
 # 한국어 번호판 규격 검증용 패턴
 # 일반 번호판: 12가3456, 123가4567
 # 구형 지역 번호판: 서울12가3456
 PLATE_PATTERN = re.compile(r"^(\d{2,3}[가-힣]\d{4}|[가-힣]{2}\s?\d{2}[가-힣]\d{4})$")
-CONFIDENCE_THRESHOLD = 0.60
+CONFIDENCE_THRESHOLD = 0.80
 
 NUMBERPLATE_DIR = "data/numberplate"
 os.makedirs(NUMBERPLATE_DIR, exist_ok=True)
@@ -346,7 +346,7 @@ async def run_ocr_on_file(src_path: str) -> dict:
     반환:
         plate_number: OCR 결과 (실패 시 "UNRECOGNIZED_{uuid[:8]}")
         image_url: data/numberplate/에 저장된 상대경로
-        is_corrected: MANUAL_REVIEW 여부
+        needs_review: MANUAL_REVIEW 여부
     """
     def _read_image():
         # Windows에서 한글 경로 cv2.imread 미지원 → np.fromfile + imdecode 사용
@@ -357,15 +357,20 @@ async def run_ocr_on_file(src_path: str) -> dict:
     if frame is None:
         uid = uuid.uuid4().hex[:8]
         logger.warning(f"[OCR] 이미지 읽기 실패: {src_path}")
-        return {"plate_number": f"UNRECOGNIZED_{uid}", "image_url": None, "is_corrected": False}
+        return {"plate_number": f"UNRECOGNIZED_{uid}", "image_url": None, "needs_review": False}
 
-    # 밝기 보정된 프레임 (야간 이미지 대응) - 이후 Stage에서 재사용
-    bright_frame = _brighten_frame(frame)
+    # 밝기 보정된 프레임 및 범퍼 크롭 — executor로 이동하여 이벤트 루프 차단 방지
+    def _preprocess_frames():
+        bright = _brighten_frame(frame)
+        bumper_y = int(frame.shape[0] * 0.50)
+        bumper = frame[bumper_y:, :]
+        bright_bmp = _brighten_frame(bumper)
+        return bright, bumper_y, bumper, bright_bmp
 
-    # ── 1차 크롭: 하단 50% 범퍼 영역 타겟팅 (번호판 위치 집중) ──
-    _bumper_y = int(frame.shape[0] * 0.50)
-    bumper_frame = frame[_bumper_y:, :]
-    bright_bumper = _brighten_frame(bumper_frame)
+    loop = asyncio.get_event_loop()
+    bright_frame, _bumper_y, bumper_frame, bright_bumper = await loop.run_in_executor(
+        _ocr_executor, _preprocess_frames
+    )
     logger.debug(f"[OCR 1차크롭] 전체 {frame.shape[0]}px → 범퍼 {bumper_frame.shape[0]}px (y≥{_bumper_y})")
 
     def _detect_plate_bbox():
@@ -550,14 +555,13 @@ async def run_ocr_on_file(src_path: str) -> dict:
 
     # OCR 전용 executor + 세마포어로 동시 실행 수 제한 (MJPEG 스트림 스레드 보호)
     async with ocr_semaphore:
-        loop = asyncio.get_event_loop()
-        plate_crop, plate_text_raw, is_corrected = await loop.run_in_executor(
+        plate_crop, plate_text_raw, needs_review = await loop.run_in_executor(
             _ocr_executor, _detect_plate_bbox
         )
 
     if plate_text_raw.startswith("MANUAL_REVIEW_REQUIRED:"):
         plate_text = plate_text_raw.split(":", 1)[1]
-        is_corrected = True
+        needs_review = True
     else:
         plate_text = plate_text_raw
 
@@ -566,31 +570,32 @@ async def run_ocr_on_file(src_path: str) -> dict:
             and not plate_text.startswith("UNRECOGNIZED"):
         logger.warning(f"[OCR] 한글 없는 결과 차단: {plate_text} → UNRECOGNIZED 처리")
         plate_text = f"UNRECOGNIZED_{uuid.uuid4().hex[:8]}"
-        is_corrected = False
+        needs_review = False
 
     if plate_crop is not None and _validate_crop(plate_crop):
         save_frame = plate_crop
     else:
-        # 최후 폴백: 범퍼 영역에서 가장 밝은 행 중심으로 크롭 (탑뷰 대응)
-        h = bumper_frame.shape[0]
-        search_region = bright_bumper[int(h * 0.10):int(h * 0.90), :]
-        gray_search = cv2.cvtColor(search_region, cv2.COLOR_BGR2GRAY)
-        row_brightness = gray_search.mean(axis=1)
-        brightest_row = int(np.argmax(row_brightness))
-        half_height = max(20, search_region.shape[0] // 8)
-        r1 = max(0, brightest_row - half_height)
-        r2 = min(search_region.shape[0], brightest_row + half_height)
-        abs_r1 = int(h * 0.10) + r1
-        abs_r2 = int(h * 0.10) + r2
-        w = bumper_frame.shape[1]
-        x1_fb = int(w * 0.15)
-        x2_fb = int(w * 0.85)
-        candidate = bumper_frame[abs_r1:abs_r2, x1_fb:x2_fb]
-        save_frame = candidate if _validate_crop(candidate) else bumper_frame[int(h * 0.10):int(h * 0.85), x1_fb:x2_fb]
-        logger.info(f"[OCR] 최후 폴백 크롭 (범퍼 영역 밝은 행 기준 r={brightest_row})")
+        def _fallback_crop():
+            h = bumper_frame.shape[0]
+            search_region = bright_bumper[int(h * 0.10):int(h * 0.90), :]
+            gray_search = cv2.cvtColor(search_region, cv2.COLOR_BGR2GRAY)
+            row_brightness = gray_search.mean(axis=1)
+            brightest_row = int(np.argmax(row_brightness))
+            half_height = max(20, search_region.shape[0] // 8)
+            r1 = max(0, brightest_row - half_height)
+            r2 = min(search_region.shape[0], brightest_row + half_height)
+            abs_r1 = int(h * 0.10) + r1
+            abs_r2 = int(h * 0.10) + r2
+            w = bumper_frame.shape[1]
+            x1_fb, x2_fb = int(w * 0.15), int(w * 0.85)
+            candidate = bumper_frame[abs_r1:abs_r2, x1_fb:x2_fb]
+            logger.info(f"[OCR] 최후 폴백 크롭 r={brightest_row}")
+            return candidate if _validate_crop(candidate) else bumper_frame[int(h * 0.10):int(h * 0.85), x1_fb:x2_fb]
+
+        save_frame = await loop.run_in_executor(_ocr_executor, _fallback_crop)
 
     image_url = await save_plate_image(save_frame, plate_text, "SPEEDING")
-    return {"plate_number": plate_text, "image_url": image_url, "is_corrected": is_corrected}
+    return {"plate_number": plate_text, "image_url": image_url, "needs_review": needs_review}
 
 
 async def process_violation_task(crop_frame: np.ndarray, violation_type: str, confidence: float):
@@ -600,11 +605,11 @@ async def process_violation_task(crop_frame: np.ndarray, violation_type: str, co
     ocr_task = extract_license_plate(crop_frame)
     plate_text_raw = await ocr_task
 
-    # MANUAL_REVIEW 접두사 처리: 접두사 제거 후 실제 값만 추출, is_corrected 플래그 세팅
-    is_corrected = False
+    # MANUAL_REVIEW 접두사 처리: 접두사 제거 후 실제 값만 추출, needs_review 플래그 세팅
+    needs_review = False
     if plate_text_raw.startswith("MANUAL_REVIEW_REQUIRED:"):
         plate_text = plate_text_raw.split(":", 1)[1]
-        is_corrected = True
+        needs_review = True
         logger.info(f"[OCR] Manual review required. Extracted value: {plate_text}")
     else:
         plate_text = plate_text_raw
@@ -620,10 +625,10 @@ async def process_violation_task(crop_frame: np.ndarray, violation_type: str, co
         "speedKmh": 0.0,
         "plateNumber": plate_text,
         "imageUrl": image_url,           # "numberplate/xxx.jpg" (프론트에서 prefix 추가)
-        "isCorrected": is_corrected,
+        "needsReview": needs_review,
     }
 
-    logger.info(f"[Violation Final] Plate: {plate_text} | Image: {image_url} | Manual: {is_corrected}")
+    logger.info(f"[Violation Final] Plate: {plate_text} | Image: {image_url} | Manual: {needs_review}")
 
     from services.webhook_client import webhook_client
     await webhook_client.send_violation(payload)

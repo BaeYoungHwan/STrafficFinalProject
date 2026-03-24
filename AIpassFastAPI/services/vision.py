@@ -213,14 +213,22 @@ async def _handle_speeding_violation(payload: dict):
         result = await run_ocr_on_file(src_path)
         payload["plateNumber"] = result["plate_number"]
         payload["imageUrl"] = result["image_url"]   # "numberplate/filename.jpg" (프론트에서 prefix 추가)
-        payload["isCorrected"] = result.get("is_corrected", False)
-        logger.info(f"[Speeding] OCR 완료 — 번호판: {result['plate_number']} | 이미지: {result['image_url']} | 수동검토: {result.get('is_corrected', False)}")
+        payload["needsReview"] = result.get("needs_review", False)
+        logger.info(f"[Speeding] OCR 완료 — 번호판: {result['plate_number']} | 이미지: {result['image_url']} | 수동검토: {result.get('needs_review', False)}")
     else:
         payload["plateNumber"] = "미인식"
         payload["imageUrl"] = None
         logger.warning(f"[Speeding] carnumber 이미지 없음 — 미인식 처리")
 
     await webhook_client.send_violation(payload)
+
+
+async def _handle_speeding_violation_safe(payload: dict):
+    """예외 격리 래퍼: 과속 처리 실패가 이벤트 루프에 전파되지 않도록 보호"""
+    try:
+        await _handle_speeding_violation(payload)
+    except Exception as e:
+        logger.error(f"[Speeding] 위반 처리 예외: {e}")
 
 
 class VisionEngine:
@@ -252,7 +260,7 @@ class VisionEngine:
 
                 if event["type"] == "SPEEDING_VIOLATION":
                     # carnumber 랜덤 이미지 → OCR → webhook 전송
-                    asyncio.create_task(_handle_speeding_violation(event["payload"]))
+                    asyncio.create_task(_handle_speeding_violation_safe(event["payload"]))
 
             except queue.Empty:
                 await asyncio.sleep(0.01)
