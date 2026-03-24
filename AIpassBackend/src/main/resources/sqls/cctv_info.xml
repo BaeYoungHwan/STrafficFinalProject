@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.aipass.dao.CctvInfoMapper">
+
+    <insert id="upsert" parameterType="com.aipass.dto.CctvInfoDTO">
+        INSERT INTO cctv_info (cctv_id, cctv_name, road_name, latitude, longitude,
+                               stream_url, district, is_active, updated_at)
+        VALUES (#{cctvId}, #{cctvName}, #{roadName}, #{latitude}, #{longitude},
+                #{streamUrl}, #{district}, #{isActive}, CURRENT_TIMESTAMP)
+        ON CONFLICT (cctv_id) DO UPDATE SET
+            cctv_name  = EXCLUDED.cctv_name,
+            road_name  = EXCLUDED.road_name,
+            latitude   = EXCLUDED.latitude,
+            longitude  = EXCLUDED.longitude,
+            stream_url = EXCLUDED.stream_url,
+            district   = EXCLUDED.district,
+            is_active  = EXCLUDED.is_active,
+            updated_at = CURRENT_TIMESTAMP
+    </insert>
+
+    <select id="findAll" resultType="com.aipass.dto.CctvInfoDTO">
+        SELECT cctv_id, cctv_name, road_name, latitude, longitude,
+               stream_url, district, is_active, updated_at
+        FROM cctv_info
+        ORDER BY updated_at DESC
+    </select>
+
+</mapper>
