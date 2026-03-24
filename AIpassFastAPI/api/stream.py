@@ -60,7 +60,7 @@ class StreamSourceRequest(BaseModel):
 async def change_stream_source(body: StreamSourceRequest):
     try:
         first_start = vision_engine.reader_process is None
-        vision_engine.restart(body.url)
+        await asyncio.to_thread(vision_engine.restart, body.url)
         if first_start:
             asyncio.create_task(vision_engine.process_event_loop())
         logger.info("[Stream] Source changed to: %s", body.url)

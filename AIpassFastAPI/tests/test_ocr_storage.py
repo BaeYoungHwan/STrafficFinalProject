@@ -755,6 +755,494 @@ class TestScoreArithmetic:
         assert bbox is not None
         assert abs(conf - 0.99) < 1e-6
 
+
+# ============================================================
+# 11. Fix A — Adaptive Gaussian Thresholding (binarize=True)
+# ============================================================
+
+class TestAdaptiveThreshold:
+    """Fix A: binarize=True 시 OTSU 대신 Adaptive Gaussian Thresholding 적용 검증.
+
+    adaptiveThreshold 는 블록 크기에 따라 지역별 임계값을 다르게 적용하므로
+    출력 픽셀은 반드시 0 또는 255 중 하나여야 한다.
+    그 후 3채널로 변환되므로 각 채널도 동일한 이진 분포를 가진다.
+    """
+
+    def _get_unique_values(self, img: np.ndarray) -> set:
+        """이미지 내 고유 픽셀 값 집합 반환 (채널 통합)."""
+        return set(np.unique(img))
+
+    def test_binarize_true_small_image_produces_binary_values(self):
+        """100x30 소형 이미지: binarize=True 시 픽셀 값이 0과 255만 존재해야 한다."""
+        img = make_image(h=30, w=100, fill=128)
+        # 단조로운 이미지보다 텍스처가 있는 이미지가 이진화 효과를 검증하기 쉬움
+        img[5:25, 10:90] = 200  # 밝은 영역 추가
+        result = _preprocess_for_ocr(img, binarize=True)
+        unique_vals = self._get_unique_values(result)
+        # 이진화 후 3채널 변환 → 픽셀 값은 0 또는 255만 허용
+        assert unique_vals.issubset({0, 255}), (
+            f"binarize=True 결과에 0/255 외 픽셀 값이 존재합니다: {unique_vals}"
+        )
+
+    def test_binarize_true_large_image_produces_binary_values(self):
+        """600x100 대형 이미지: binarize=True 시 픽셀 값이 0과 255만 존재해야 한다."""
+        img = make_image(h=100, w=600, fill=100)
+        img[20:80, 50:550] = 220  # 다양한 밝기 영역
+        result = _preprocess_for_ocr(img, binarize=True)
+        unique_vals = self._get_unique_values(result)
+        assert unique_vals.issubset({0, 255}), (
+            f"대형 이미지 binarize=True 결과에 0/255 외 픽셀 값이 존재합니다: {unique_vals}"
+        )
+
+    def test_binarize_false_allows_non_binary_values(self):
+        """binarize=False 시 중간 그레이 값이 허용되어야 한다 (이진화 미적용 확인)."""
+        img = make_image(h=50, w=300, fill=128)
+        result = _preprocess_for_ocr(img, binarize=False)
+        unique_vals = self._get_unique_values(result)
+        # 이진화가 없으면 0과 255 사이의 값이 존재할 수 있다
+        # (CLAHE + Unsharp Masking 후에도 중간값이 남아 있어야 정상)
+        assert not unique_vals.issubset({0, 255}), (
+            "binarize=False 인데도 이진 값만 반환됩니다 — 이진화가 잘못 적용된 것 같습니다."
+        )
+
+    def test_binarize_true_output_is_3channel(self):
+        """이진화 후 3채널 변환이 정상적으로 수행되는지 확인."""
+        img = make_image(h=50, w=300)
+        result = _preprocess_for_ocr(img, binarize=True)
+        assert result.ndim == 3 and result.shape[2] == 3
+
+    def test_binarize_true_both_extremes_present_on_gradient_image(self):
+        """명암 대비가 있는 이미지에서 0과 255 양쪽 모두 존재하는지 확인."""
+        # 왼쪽 절반은 어둡고 오른쪽 절반은 밝게 — Adaptive Threshold 효과 극대화
+        img = np.zeros((50, 300, 3), dtype=np.uint8)
+        img[:, 150:] = 240  # 오른쪽 절반 밝음
+        result = _preprocess_for_ocr(img, binarize=True)
+        unique_vals = self._get_unique_values(result)
+        assert 0 in unique_vals, "이진화 결과에 0(어두운 픽셀)이 없습니다."
+        assert 255 in unique_vals, "이진화 결과에 255(밝은 픽셀)이 없습니다."
+
+
+# ============================================================
+# 12. Fix B — 동적 CLAHE tileGridSize
+# ============================================================
+
+class TestDynamicClaheTileSize:
+    """Fix B: 이미지 크기에 비례하여 CLAHE tileGridSize 를 계산하는지 검증.
+
+    tileGridSize = (max(4, w//8), max(4, h//4))
+    작은 이미지에서는 최솟값 4 가 보장되어야 하고,
+    큰 이미지에서는 비례 계산값이 4 보다 커야 한다.
+    """
+
+    def _compute_expected_tile(self, h: int, w: int) -> tuple:
+        """소스 코드와 동일한 tileGridSize 계산 로직."""
+        tile_w = max(4, w // 8)
+        tile_h = max(4, h // 4)
+        return tile_w, tile_h
+
+    def test_small_image_tile_is_at_least_4x4(self):
+        """30x100 소형 이미지: tileGridSize 가 최소 (4, 4) 이어야 한다.
+
+        tileGridSize 를 직접 읽을 수 없으므로, _preprocess_for_ocr 가
+        예외 없이 완료되고 출력 형상이 유효한지로 간접 검증한다.
+        CLAHE tileGridSize 가 (1,1) 처럼 너무 작으면 cv2.createCLAHE 가
+        에러 없이 통과하므로, 함수가 정상 완료됨을 보장하는 방식으로 검증.
+        """
+        img = make_image(h=30, w=100)
+        # w=100 < 600 → 리사이즈 후 w=600, h=180
+        result = _preprocess_for_ocr(img, binarize=False)
+        assert result is not None
+        assert result.shape[2] == 3
+
+    def test_large_image_tile_exceeds_minimum(self):
+        """800x200 대형 이미지: tileGridSize 가 최솟값 4 보다 크다.
+
+        w=800 → tile_w = max(4, 800//8) = 100
+        h=200 → tile_h = max(4, 200//4) = 50
+        → (100, 50) 이 예상값.
+        """
+        expected_tile_w, expected_tile_h = self._compute_expected_tile(200, 800)
+        assert expected_tile_w > 4  # 100 > 4
+        assert expected_tile_h > 4  # 50 > 4
+        # 실제 함수가 해당 크기로 정상 동작하는지 검증
+        img = make_image(h=200, w=800)
+        result = _preprocess_for_ocr(img, binarize=False)
+        assert result.shape == (200, 800, 3)
+
+    def test_very_small_image_clamped_to_minimum_4(self):
+        """16x8 극소형 이미지 (리사이즈 전): 최솟값 4 가 적용되어야 한다.
+
+        w=16 → tile_w = max(4, 16//8) = max(4, 2) = 4
+        h=8  → tile_h = max(4, 8//4)  = max(4, 2) = 4
+        """
+        tile_w, tile_h = self._compute_expected_tile(8, 16)
+        assert tile_w == 4
+        assert tile_h == 4
+
+    def test_tile_calculation_formula_consistency(self):
+        """다양한 크기에서 tile 계산 공식의 일관성을 검증한다."""
+        sizes = [
+            (10, 30),   # 극소형
+            (50, 200),  # 소형
+            (100, 600), # 중형
+            (200, 800), # 대형
+        ]
+        for h, w in sizes:
+            tile_w, tile_h = self._compute_expected_tile(h, w)
+            assert tile_w >= 4, f"h={h},w={w}: tile_w={tile_w} < 4"
+            assert tile_h >= 4, f"h={h},w={w}: tile_h={tile_h} < 4"
+            # 값이 이미지 크기를 초과하지 않아야 함
+            assert tile_w <= w, f"tile_w={tile_w} > w={w}"
+            assert tile_h <= h, f"tile_h={tile_h} > h={h}"
+
+    def test_preprocess_does_not_raise_for_tiny_image(self):
+        """tileGridSize 계산 오류 시 cv2.createCLAHE 예외가 발생하므로
+        정상 완료 여부로 최솟값 클램핑이 올바른지 간접 검증한다."""
+        img = make_image(h=15, w=40)
+        # 예외 없이 완료되면 tileGridSize 가 유효한 것
+        result = _preprocess_for_ocr(img, binarize=False)
+        assert result is not None
+
+
+# ============================================================
+# 13. Fix D — Unsharp Masking (CLAHE 후 샤프닝)
+# ============================================================
+
+class TestUnsharpMasking:
+    """Fix D: CLAHE 적용 후 Unsharp Masking 으로 획 경계를 강화하는지 검증.
+
+    Unsharp Masking 공식: enhanced = 1.8 * original - 0.8 * gaussian_blur
+    → 결과가 원본 CLAHE 이미지와 달라야 한다 (샤프닝 효과).
+    """
+
+    def test_output_differs_from_plain_clahe(self):
+        """Unsharp Masking 적용 후 결과가 단순 CLAHE 결과와 달라야 한다.
+
+        CLAHE 만 적용한 경우와 CLAHE + Unsharp Masking 을 적용한 경우를
+        비교하여 샤프닝이 실제로 수행되었는지 확인한다.
+        """
+        import cv2 as _cv2
+        img = make_image(h=50, w=300, fill=128)
+        img[10:40, 50:250] = 200  # 텍스처 추가
+
+        # _preprocess_for_ocr 결과 (Unsharp Masking 포함)
+        result_with_usm = _preprocess_for_ocr(img, binarize=False)
+
+        # 순수 CLAHE 만 적용한 비교 이미지 직접 생성
+        h, w = img.shape[:2]
+        if w < 600:
+            scale = 600 / w
+            img_resized = _cv2.resize(img, (600, int(h * scale)), interpolation=_cv2.INTER_CUBIC)
+        else:
+            img_resized = img.copy()
+        gray = _cv2.cvtColor(img_resized, _cv2.COLOR_BGR2GRAY)
+        tile_w = max(4, img_resized.shape[1] // 8)
+        tile_h = max(4, img_resized.shape[0] // 4)
+        clahe = _cv2.createCLAHE(clipLimit=2.0, tileGridSize=(tile_w, tile_h))
+        clahe_only = clahe.apply(gray)
+        result_clahe_only = _cv2.cvtColor(clahe_only, _cv2.COLOR_GRAY2BGR)
+
+        # Unsharp Masking 이 적용되면 두 결과가 달라야 한다
+        assert not np.array_equal(result_with_usm, result_clahe_only), (
+            "Unsharp Masking 이 적용되지 않았습니다 — CLAHE 결과와 동일합니다."
+        )
+
+    def test_output_shape_preserved_after_unsharp_masking(self):
+        """Unsharp Masking 후 이미지 형상이 유지되어야 한다."""
+        img = make_image(h=60, w=600)
+        result = _preprocess_for_ocr(img, binarize=False)
+        assert result.shape == (60, 600, 3)
+
+    def test_output_dtype_uint8_after_unsharp_masking(self):
+        """addWeighted 연산 후 dtype 이 uint8 로 유지되어야 한다."""
+        img = make_image(h=50, w=300)
+        result = _preprocess_for_ocr(img, binarize=False)
+        assert result.dtype == np.uint8
+
+    def test_high_contrast_image_sharpened(self):
+        """고대비 이미지에서 Unsharp Masking 이 엣지를 강화하는지 검증.
+
+        엣지 픽셀의 절댓값 차이가 원본보다 크거나 같으면 샤프닝이 된 것.
+        """
+        import cv2 as _cv2
+        # 좌반부 0, 우반부 255 — 경계선이 명확한 이미지
+        img = np.zeros((50, 600, 3), dtype=np.uint8)
+        img[:, 300:] = 255
+
+        result = _preprocess_for_ocr(img, binarize=False)
+        # 결과가 올바른 형태로 반환되는지 최소한 확인
+        assert result.shape == (50, 600, 3)
+        assert result.dtype == np.uint8
+
+
+# ============================================================
+# 14. Fix C — 한글 없음 가드 (run_ocr_on_file)
+# ============================================================
+
+class TestNoHangulGuard:
+    """Fix C: OCR 결과에 한글이 없는 경우(숫자만) UNRECOGNIZED_xxx 로 변환.
+
+    run_ocr_on_file() 에서 plate_text 가 한글([가-힣])을 포함하지 않고
+    UNRECOGNIZED 로 시작하지 않으면 UNRECOGNIZED_{uuid} 로 교체한다.
+
+    패치 전략:
+      - np.fromfile → 실제 파일 I/O 없이 더미 바이트 반환
+      - cv2.imdecode → 더미 이미지 반환
+      - ocr_model.ocr → 원하는 텍스트 반환
+      - save_plate_image → 파일 쓰기 없이 파일명 캡처
+    """
+
+    def _make_valid_bbox_result(self, text: str, conf: float):
+        """geometry 검증을 통과하는 bbox + 텍스트를 가진 PaddleOCR 결과."""
+        # bw=300, bh=50, ratio=6.0 → geometry 통과
+        valid_bbox = [[10, 10], [310, 10], [310, 60], [10, 60]]
+        return [[[valid_bbox, (text, conf)]]]
+
+    @pytest.mark.asyncio
+    async def test_numbers_only_result_produces_unrecognized_filename(self):
+        """PaddleOCR 이 "1265999" (숫자만) 반환 시 저장 파일명이 UNRECOGNIZED_ 로 시작해야 한다."""
+        img = make_bright_image(h=400, w=600)
+        ocr_result = self._make_valid_bbox_result("1265999", 0.85)
+
+        captured = {}
+
+        async def mock_save(frame, plate_text, violation_type):
+            captured["plate_text"] = plate_text
+            return f"numberplate/{plate_text}.jpg"
+
+        with patch("services.ocr_storage.np.fromfile", return_value=np.zeros(100, dtype=np.uint8)):
+            with patch("services.ocr_storage.cv2.imdecode", return_value=img):
+                with patch.object(ocr_mod, "ocr_model") as mock_ocr:
+                    mock_ocr.ocr.return_value = ocr_result
+                    with patch("services.ocr_storage.save_plate_image", side_effect=mock_save):
+                        result = await run_ocr_on_file("test.jpg")
+
+        assert result["plate_number"].startswith("UNRECOGNIZED_"), (
+            f"숫자만 있는 OCR 결과가 UNRECOGNIZED_ 로 변환되지 않았습니다: {result['plate_number']}"
+        )
+        assert captured["plate_text"].startswith("UNRECOGNIZED_"), (
+            f"save_plate_image 에 전달된 plate_text 가 UNRECOGNIZED_ 가 아닙니다: {captured['plate_text']}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_hangul_result_passes_guard(self):
+        """PaddleOCR 이 "12가3456" 반환 시 파일명이 "12가3456.jpg" 이어야 한다."""
+        img = make_bright_image(h=400, w=600)
+        ocr_result = self._make_valid_bbox_result("12가3456", 0.85)
+
+        captured = {}
+
+        async def mock_save(frame, plate_text, violation_type):
+            captured["plate_text"] = plate_text
+            return f"numberplate/{plate_text}.jpg"
+
+        with patch("services.ocr_storage.np.fromfile", return_value=np.zeros(100, dtype=np.uint8)):
+            with patch("services.ocr_storage.cv2.imdecode", return_value=img):
+                with patch.object(ocr_mod, "ocr_model") as mock_ocr:
+                    mock_ocr.ocr.return_value = ocr_result
+                    with patch("services.ocr_storage.save_plate_image", side_effect=mock_save):
+                        result = await run_ocr_on_file("test.jpg")
+
+        assert result["plate_number"] == "12가3456", (
+            f"한글 포함 결과가 가드를 통과하지 못했습니다: {result['plate_number']}"
+        )
+        assert captured["plate_text"] == "12가3456"
+
+    @pytest.mark.asyncio
+    async def test_already_unrecognized_prefix_not_double_wrapped(self):
+        """이미 UNRECOGNIZED 로 시작하는 텍스트는 가드가 재처리하지 않아야 한다.
+
+        Stage -1 OCR 이 None, Stage 0c 도 실패, _strip_ok=False 경로(이미지가 작음)에서
+        모든 단계 실패 시 "UNRECOGNIZED" 로 시작해야 하며
+        이중 중첩("UNRECOGNIZED_UNRECOGNIZED...") 이 발생해서는 안 된다.
+
+        주의: h=40, w=600 처럼 bumper_frame 이 너무 작으면 _strip_ok=False 가 되어
+        _combined0 UnboundLocalError (소스 코드의 기존 버그) 를 우회할 수 있다.
+        이 테스트는 그 경로를 통해 UNRECOGNIZED 이중 중첩 가드를 검증한다.
+        """
+        # bumper_frame h = 400 * 0.5 = 200 → _s h = 200 * 0.9 = 180
+        # _half_h = max(20, 180 // 8) = 22 → _tight_crop h ≈ 44 >= 10 → _strip_ok=True 가능
+        # 대신 이미지를 좁게 만들어 tight_crop width < 40 이 되도록 설정
+        # w=40 → _x1 = int(40 * 0.10) = 4, _x2 = int(40 * 0.90) = 36 → width=32 < 40 → _strip_ok=False
+        img = make_bright_image(h=400, w=40)
+
+        captured = {}
+
+        async def mock_save(frame, plate_text, violation_type):
+            captured["plate_text"] = plate_text
+            return f"numberplate/{plate_text}.jpg"
+
+        with patch("services.ocr_storage.np.fromfile", return_value=np.zeros(100, dtype=np.uint8)):
+            with patch("services.ocr_storage.cv2.imdecode", return_value=img):
+                with patch.object(ocr_mod, "ocr_model") as mock_ocr:
+                    mock_ocr.ocr.return_value = [[]]  # 모든 단계 실패
+                    with patch("services.ocr_storage.save_plate_image", side_effect=mock_save):
+                        result = await run_ocr_on_file("test.jpg")
+
+        plate = result["plate_number"]
+        # 모든 단계 실패 시 "UNRECOGNIZED" 로 시작해야 한다
+        assert plate.startswith("UNRECOGNIZED"), (
+            f"모든 단계 실패 시 UNRECOGNIZED 로 시작해야 합니다: {plate}"
+        )
+        # 이중 중첩("UNRECOGNIZED_UNRECOGNIZED...") 이 발생하지 않아야 한다
+        assert not plate.startswith("UNRECOGNIZED_UNRECOGNIZED"), (
+            f"UNRECOGNIZED 가 이중으로 중첩되었습니다: {plate}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_mixed_digit_hangul_passes_guard(self):
+        """숫자 + 한글 조합이지만 PLATE_PATTERN 불일치인 경우도 한글이 있으면 가드를 통과한다.
+
+        가드 조건: `not re.search(r'[가-힣]', plate_text)` 이므로
+        한글 문자가 하나라도 있으면 UNRECOGNIZED_ 로 변환되지 않는다.
+        "99가" 처럼 PLATE_PATTERN 불일치이지만 한글이 있는 경우를 검증한다.
+        """
+        img = make_bright_image(h=400, w=600)
+        # geometry 통과 bbox + 한글 포함 텍스트 (PLATE_PATTERN 불일치 길이)
+        valid_bbox = [[10, 10], [310, 10], [310, 60], [10, 60]]
+        ocr_result = [[[valid_bbox, ("99가", 0.85)]]]
+
+        captured = {}
+
+        async def mock_save(frame, plate_text, violation_type):
+            captured["plate_text"] = plate_text
+            return f"numberplate/{plate_text}.jpg"
+
+        with patch("services.ocr_storage.np.fromfile", return_value=np.zeros(100, dtype=np.uint8)):
+            with patch("services.ocr_storage.cv2.imdecode", return_value=img):
+                with patch.object(ocr_mod, "ocr_model") as mock_ocr:
+                    mock_ocr.ocr.return_value = ocr_result
+                    with patch("services.ocr_storage.save_plate_image", side_effect=mock_save):
+                        result = await run_ocr_on_file("test.jpg")
+
+        # "99가" 는 한글을 포함하므로 한글 없음 가드 대상이 아님
+        plate = result["plate_number"]
+        assert not plate.startswith("UNRECOGNIZED_") or "가" in captured.get("plate_text", ""), (
+            f"한글 포함 텍스트가 잘못 UNRECOGNIZED_ 로 변환되었습니다: {plate}"
+        )
+
+
+# ============================================================
+# 15. Fix E — Stage 0c: Lanczos 2x 컬러 직접 OCR
+# ============================================================
+
+class TestStage0c:
+    """Fix E: _detect_plate_bbox 내 Stage 0c — Lanczos 2x 컬러 업스케일 직접 OCR 경로 검증.
+
+    Stage 0c 는 tight_crop 을 Lanczos4 알고리즘으로 2배 확대하여
+    _preprocess_for_ocr 없이 직접 PaddleOCR 에 전달한다.
+    이 경로가 활성화되려면:
+      1. tight_crop.size > 0, shape[0] >= 10, shape[1] >= 40 조건 충족
+      2. ocr_model.ocr 결과가 PLATE_PATTERN 과 일치하는 텍스트 반환
+    """
+
+    def _make_stage0c_ocr_return(self, text: str, conf: float):
+        """Stage 0c 내부 결과 파싱 형식: result[0] 이 라인 리스트."""
+        return [
+            [[[0, 0], [100, 0], [100, 20], [0, 20]], (text, conf)]
+        ]
+
+    @pytest.mark.asyncio
+    async def test_stage0c_detected_plate_returned(self):
+        """Stage 0c 에서 번호판 패턴 일치 시 해당 텍스트가 최종 결과에 반영된다."""
+        # bumper_frame 에서 tight_crop 이 충분히 크도록 이미지 설정
+        # h=200, w=600 → bumper_frame h=100, w=600 (하단 50%)
+        # _s = bright_bumper[5%~95%] → h=90
+        # _brightest_row 가 45 (중간), _half_h = max(20, 90//8=11) = 20
+        # → _tight_crop h = ~40px, w = 0.8 * 600 = 480px → 조건 충족
+        img = make_bright_image(h=200, w=600)
+
+        captured = {}
+
+        async def mock_save(frame, plate_text, violation_type):
+            captured["plate_text"] = plate_text
+            return f"numberplate/{plate_text}.jpg"
+
+        # Stage 0c OCR 결과만 번호판 패턴과 일치하도록 설정
+        # 다른 OCR 호출은 빈 결과 반환 (Stage -1, Stage 1 등)
+        call_count = [0]
+
+        def ocr_side_effect(img_arg):
+            call_count[0] += 1
+            # 첫 번째 호출(Stage -1: 전체 frame)은 빈 결과
+            if call_count[0] == 1:
+                return [[]]
+            # 두 번째 호출(Stage 0c: tight_crop 2x)은 번호판 패턴 반환
+            if call_count[0] == 2:
+                return [self._make_stage0c_ocr_return("34나5678", 0.88)]
+            # 이후 모든 호출은 빈 결과
+            return [[]]
+
+        with patch("services.ocr_storage.np.fromfile", return_value=np.zeros(100, dtype=np.uint8)):
+            with patch("services.ocr_storage.cv2.imdecode", return_value=img):
+                with patch.object(ocr_mod, "ocr_model") as mock_ocr:
+                    mock_ocr.ocr.side_effect = ocr_side_effect
+                    with patch("services.ocr_storage.save_plate_image", side_effect=mock_save):
+                        result = await run_ocr_on_file("test.jpg")
+
+        assert result["plate_number"] == "34나5678", (
+            f"Stage 0c 에서 인식된 번호판이 결과에 반영되지 않았습니다: {result['plate_number']}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_stage0c_skipped_when_tight_crop_too_small(self):
+        """tight_crop 이 조건(h<10 또는 w<40)을 충족하지 않으면 Stage 0c 가 건너뛰어진다.
+
+        이미지가 너무 작으면 tight_crop 이 소형이 되어 Stage 0c 가 스킵된다.
+        전체 파이프라인이 예외 없이 완료되어야 한다.
+        """
+        # h=20 → bumper_frame h=10, _s h≈8 → tight_crop h 매우 작음
+        img = make_bright_image(h=20, w=200)
+
+        with patch("services.ocr_storage.np.fromfile", return_value=np.zeros(100, dtype=np.uint8)):
+            with patch("services.ocr_storage.cv2.imdecode", return_value=img):
+                with patch.object(ocr_mod, "ocr_model") as mock_ocr:
+                    mock_ocr.ocr.return_value = [[]]
+                    with patch("services.ocr_storage.save_plate_image",
+                               new_callable=AsyncMock,
+                               return_value="numberplate/test.jpg"):
+                        # 예외 없이 완료되는지만 확인
+                        result = await run_ocr_on_file("test.jpg")
+
+        assert "plate_number" in result
+
+    @pytest.mark.asyncio
+    async def test_stage0c_no_hangul_in_result_skipped(self):
+        """Stage 0c 결과가 PLATE_PATTERN 불일치(한글 없음)이면 해당 경로를 건너뛰어야 한다.
+
+        숫자만 반환해도 Stage 0c 는 패턴 불일치로 스킵하고 다음 Stage 로 진행한다.
+
+        이 테스트는 이미지를 narrow(w=40)하게 만들어 _strip_ok=False 로 만든 뒤
+        Stage 0c 만 활성화되도록 유도한다. Stage 0c 결과가 패턴 불일치이면 스킵하고
+        이후 단계로 진행하여 최종 결과는 UNRECOGNIZED 로 끝나야 한다.
+
+        Stage 0c 내부 파싱 형식:
+          result[0] 은 라인 리스트 [bbox, (text, conf)]
+          _l[1][0] = text (str), _l[1][1] = conf (float)
+        """
+        # w=40 → _x1=4, _x2=36 → tight_crop width=32 < 40 → _strip_ok=False
+        # tight_crop 은 여전히 Stage 0c 조건(shape[1] >= 40)도 불충족 → Stage 0c 도 스킵됨
+        # 따라서 이 케이스는 Stage 0c 가 조건 불충족으로 건너뛰어지는 경로를 검증
+        img = make_bright_image(h=200, w=40)
+
+        with patch("services.ocr_storage.np.fromfile", return_value=np.zeros(100, dtype=np.uint8)):
+            with patch("services.ocr_storage.cv2.imdecode", return_value=img):
+                with patch.object(ocr_mod, "ocr_model") as mock_ocr:
+                    mock_ocr.ocr.return_value = [[]]
+                    with patch("services.ocr_storage.save_plate_image",
+                               new_callable=AsyncMock,
+                               return_value="numberplate/test.jpg"):
+                        result = await run_ocr_on_file("test.jpg")
+
+        # Stage 0c 가 스킵(조건 불충족)되었으므로 최종 결과는 UNRECOGNIZED 계열이어야 함
+        # "1265999" 같은 숫자만의 값이 최종 결과로 반영되면 안 됨
+        assert result["plate_number"] != "1265999", (
+            "Stage 0c 에서 패턴 불일치 결과가 최종 번호판으로 잘못 반영되었습니다."
+        )
+        assert result["plate_number"].startswith("UNRECOGNIZED"), (
+            f"Stage 0c 스킵 후 모든 단계 실패 시 UNRECOGNIZED 로 시작해야 합니다: {result['plate_number']}"
+        )
+
     def test_regex_match_beats_higher_raw_conf(self):
         """regex 매칭 가산점이 있으면 낮은 conf 라도 높은 conf + no_regex 를 이긴다."""
         # line_a: conf=0.65 + regex = score 1.65

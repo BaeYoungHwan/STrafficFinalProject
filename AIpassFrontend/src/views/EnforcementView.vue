@@ -231,11 +231,12 @@
         <span>실시간 과속 감지 모니터</span>
         <button class="btn-close" @click="showStreamModal = false">✕</button>
       </div>
-      <img
+      <iframe
         :src="streamUrl"
-        alt="실시간 스트리밍"
         class="stream-img"
-      />
+        frameborder="0"
+        allowfullscreen
+      ></iframe>
     </div>
   </div>
 </template>
@@ -384,15 +385,11 @@ const updateStatus = async (newStatus) => {
   }
 }
 
-onMounted(async () => {
+onMounted(() => {
   fetchList()
-  try {
-    const res = await api.get('/cctv/list')
-    const ganghwa = (res.data.data || []).find(c => c.cctvName?.includes('강화대교'))
-    if (ganghwa?.streamUrl) streamUrl.value = ganghwa.streamUrl
-  } catch (e) {
-    // 조회 실패 시 streamUrl 빈 값 유지
-  }
+  streamUrl.value = import.meta.env.DEV
+    ? 'http://localhost:8000/api/v1/stream/video'
+    : '/ai/api/v1/stream/video'
 })
 </script>
 
@@ -994,7 +991,7 @@ tbody tr.selected {
   background: #1A1A2E;
   border-radius: 16px;
   overflow: hidden;
-  width: 860px;
+  width: 660px;
   max-width: 95vw;
 }
 
@@ -1020,8 +1017,8 @@ tbody tr.selected {
 .stream-img {
   display: block;
   width: 100%;
-  max-height: 540px;
-  object-fit: contain;
+  height: 480px;
+  border: none;
   background: #000;
 }
 

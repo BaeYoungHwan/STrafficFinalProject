@@ -45,4 +45,103 @@
         WHERE detected_at::date = CURRENT_DATE
     </select>
 
+
+    <!-- 도로 구간별 혼잡도 조회 (traffic_flow_log 기반, link_id 균등 분배) -->
+    <select id="findRoadSegments" resultType="com.aipass.dto.RoadSegmentDTO">
+        WITH latest_per_link AS (
+            SELECT DISTINCT ON (link_id)
+                link_id,
+                congestion_level
+            FROM traffic_flow_log
+            ORDER BY link_id, collected_at DESC
+        ),
+        ranked AS (
+            SELECT
+                congestion_level,
+                ROW_NUMBER() OVER (ORDER BY link_id) AS rn,
+                COUNT(*)      OVER ()                AS total_cnt
+            FROM latest_per_link
+        ),
+        segment_mode AS (
+            SELECT
+                LEAST(11, CEIL(rn * 11.0 / NULLIF(total_cnt, 0))::INTEGER) AS seg,
+                MODE() WITHIN GROUP (ORDER BY congestion_level)             AS congestion_level
+            FROM ranked
+            GROUP BY 1
+        )
+        SELECT
+            i1.intersection_id                       AS from_id,
+            CAST(i1.latitude  AS DOUBLE PRECISION)   AS from_lat,
+            CAST(i1.longitude AS DOUBLE PRECISION)   AS from_lng,
+            i2.intersection_id                       AS to_id,
+            CAST(i2.latitude  AS DOUBLE PRECISION)   AS to_lat,
+            CAST(i2.longitude AS DOUBLE PRECISION)   AS to_lng,
+            COALESCE(sm.congestion_level, 'UNKNOWN') AS congestion_level
+        FROM intersection i1
+        JOIN intersection i2 ON i2.intersection_id = i1.intersection_id + 1
+        LEFT JOIN segment_mode sm ON sm.seg = i1.intersection_id
+        ORDER BY i1.intersection_id
+    </select>
+
+    <!-- 방향별 도로 구간 혼잡도 조회 (direction: UP / DOWN) -->
+    <select id="findRoadSegmentsByDirection" resultType="com.aipass.dto.RoadSegmentDTO">
+        WITH latest_per_link AS (
+            SELECT DISTINCT ON (link_id)
+                link_id,
+                congestion_level
+            FROM traffic_flow_log
+            WHERE direction = #{direction}
+            ORDER BY link_id, collected_at DESC
+        ),
+        ranked AS (
+            SELECT
+                congestion_level,
+                ROW_NUMBER() OVER (ORDER BY link_id) AS rn,
+                COUNT(*)      OVER ()                AS total_cnt
+            FROM latest_per_link
+        ),
+        segment_mode AS (
+            SELECT
+                LEAST(11, CEIL(rn * 11.0 / NULLIF(total_cnt, 0))::INTEGER) AS seg,
+                MODE() WITHIN GROUP (ORDER BY congestion_level)             AS congestion_level
+            FROM ranked
+            GROUP BY 1
+        )
+        SELECT
+            i1.intersection_id                       AS from_id,
+            CAST(i1.latitude  AS DOUBLE PRECISION)   AS from_lat,
+            CAST(i1.longitude AS DOUBLE PRECISION)   AS from_lng,
+            i2.intersection_id                       AS to_id,
+            CAST(i2.latitude  AS DOUBLE PRECISION)   AS to_lat,
+            CAST(i2.longitude AS DOUBLE PRECISION)   AS to_lng,
+            COALESCE(sm.congestion_level, 'UNKNOWN') AS congestion_level
+        FROM intersection i1
+        JOIN intersection i2 ON i2.intersection_id = i1.intersection_id + 1
+        LEFT JOIN segment_mode sm ON sm.seg = i1.intersection_id
+        ORDER BY i1.intersection_id
+    </select>
+
+    <!-- 오늘/어제 교통량 집계 -->
+    <select id="findTrafficSummary" resultType="com.aipass.dto.DashboardTrafficSummaryDTO">
+        SELECT
+            COUNT(*) FILTER (WHERE collected_at::date = CURRENT_DATE)         AS today_count,
+            COUNT(*) FILTER (WHERE collected_at::date = CURRENT_DATE - 1)     AS yesterday_count
+        FROM traffic_flow_log
+    </select>
+
+    <!-- 특정 날짜 교통량 집계 (주간 데이터용) -->
+    <select id="findTrafficCountByDate" resultType="java.lang.Long">
+        SELECT COUNT(*) FROM traffic_flow_log
+        WHERE collected_at::date = #{date}::date
+    </select>
+
+    <!-- CCTV 상태 집계 -->
+    <select id="findCctvStatus" resultType="com.aipass.dto.DashboardCctvStatusDTO">
+        SELECT
+            COUNT(*) FILTER (WHERE is_active = true)  AS active_count,
+            COUNT(*) FILTER (WHERE is_active = false) AS inactive_count,
+            COUNT(*)                                  AS total_count
+        FROM cctv_info
+    </select>
+
 </mapper>

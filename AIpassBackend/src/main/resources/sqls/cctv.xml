@@ -32,8 +32,8 @@
             is_active,
             TO_CHAR(updated_at AT TIME ZONE 'Asia/Seoul', 'YY-MM-DD HH24:MI:SS') AS updated_at
         FROM cctv_info
-        WHERE is_active = true
-        ORDER BY cctv_name ASC
+        WHERE cctv_id = '4700'
+          AND is_active = true
         LIMIT 1
     </select>
 
