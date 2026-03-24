@@ -10,10 +10,10 @@ from core.config import settings as _cfg
 logger = logging.getLogger(__name__)
 
 vehicle_history = {}
-SPEED_LIMIT_KMH = 70.0
-MAX_PLAUSIBLE_SPEED_KMH = 100.0  # 물리적 상한선
-EMA_ALPHA = 0.3
-CONSECUTIVE_OVER_THRESHOLD = 5  # N프레임 연속 과속 시에만 신고 (순간 튐 방지)
+SPEED_LIMIT_KMH = _cfg.SPEED_LIMIT_KMH
+MAX_PLAUSIBLE_SPEED_KMH = _cfg.MAX_PLAUSIBLE_SPEED_KMH
+EMA_ALPHA = _cfg.EMA_ALPHA
+CONSECUTIVE_OVER_THRESHOLD = _cfg.CONSECUTIVE_OVER_THRESHOLD
 
 # 강화대교 카메라 전용 호모그래피 (640x480 실제 화면 분석 기반)
 # src_pts: 영상 내 도로 4개 꼭짓점 (픽셀)

@@ -522,7 +522,8 @@ ITS 교통소통 파트에서 먼저 이 테이블을 만들었다면 CREATE 중
 	
 
   select * from violation_log;
-
+  select * from cctv_info;
+SELECT cctv_id, cctv_name, is_active FROM cctv_info;
 -- =========================================================================
 -- violation_log 번호판 이미지 경로 컬럼 추가
 -- image_url: OCR 후 크롭된 번호판 이미지 상대경로 (예: numberplate/12가3456.jpg)
@@ -530,7 +531,7 @@ ITS 교통소통 파트에서 먼저 이 테이블을 만들었다면 CREATE 중
 ALTER TABLE violation_log
   ADD COLUMN IF NOT EXISTS image_url VARCHAR(255);
 
-
+TRUNCATE TABLE violation_log;
 -- =========================================================================
 -- [최종 확정] violation_log 컬럼 보강 — 안전 적용 (IF NOT EXISTS)
 -- 과속 감지 파이프라인에 필요한 모든 컬럼을 일괄 추가한다.
@@ -549,6 +550,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_violation_event_id
     WHERE event_id IS NOT NULL;
 
 -- intersection_id NOT NULL 해제 (FastAPI webhook은 교차로 ID 미제공)
-ALTER TABLE violation_log ALTER COLUMN intersection_id DROP NOT NULL;
+ALTER TABLE violation_log ADD COLUMN intersection_id DROP NOT NULL;
 ALTER TABLE violation_log ADD COLUMN src_image_url VARCHAR(255)
 

@@ -33,4 +33,11 @@ _ultra_stub = types.ModuleType("ultralytics")
 class _FakeYOLO:
     def __init__(self, *args, **kwargs):
         pass
+    def track(self, *args, **kwargs):
+        from unittest.mock import MagicMock
+        mock_result = MagicMock()
+        mock_result.boxes = None
+        return [mock_result]
+
+_ultra_stub.YOLO = _FakeYOLO
 sys.modules.setdefault("ultralytics", _ultra_stub)

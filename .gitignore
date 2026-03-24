@@ -16,8 +16,10 @@ venv/
 AIpassBackend/src/main/resources/application.properties
 
 # 3. Frontend (Vue.js / Node)
-/frontend/node_modules/
-/frontend/dist/
+AIpassFrontend/node_modules/
+AIpassFrontend/dist/
+node_modules/
+AIpassFastAPI/data/debug/
 /CLAUDE.md
 
 .claude/

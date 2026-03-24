@@ -15,6 +15,8 @@ import java.util.Map;
 @RequestMapping("/api/auth")
 public class AuthController {
 
+    private static final String EMAIL_REGEX = "^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$";
+
     private final MemberService memberService;
 
     public AuthController(MemberService memberService) {
@@ -69,7 +71,7 @@ public class AuthController {
             return ResponseEntity.badRequest()
                     .body(Map.of("message", "이름은 2자 이상 한글 또는 영문만 입력하세요."));
         }
-        if (email == null || !email.trim().matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$")) {
+        if (!isValidEmail(email)) {
             return ResponseEntity.badRequest()
                     .body(Map.of("message", "올바른 이메일 형식을 입력하세요."));
         }
@@ -96,7 +98,7 @@ public class AuthController {
             return ResponseEntity.badRequest()
                     .body(Map.of("message", "아이디를 입력하세요."));
         }
-        if (email == null || !email.trim().matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$")) {
+        if (!isValidEmail(email)) {
             return ResponseEntity.badRequest()
                     .body(Map.of("message", "올바른 이메일 형식을 입력하세요."));
         }
@@ -120,15 +122,11 @@ public class AuthController {
             return ResponseEntity.badRequest()
                     .body(Map.of("message", "아이디를 입력하세요."));
         }
-        if (email == null || !email.trim().matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$")) {
+        if (!isValidEmail(email)) {
             return ResponseEntity.badRequest()
                     .body(Map.of("message", "올바른 이메일 형식을 입력하세요."));
         }
-        if (newPassword == null || newPassword.length() < 8 || newPassword.length() > 16
-                || !newPassword.matches(".*[A-Z].*")
-                || !newPassword.matches(".*[a-z].*")
-                || !newPassword.matches(".*[0-9].*")
-                || !newPassword.matches(".*[!@#$%^&*()_+\\-=\\[\\]{};':\"\\\\|,.<>/?].*")) {
+        if (!isValidPassword(newPassword)) {
             return ResponseEntity.badRequest()
                     .body(Map.of("message", "비밀번호는 8~16자, 영문 대/소문자, 숫자, 특수문자를 포함해야 합니다."));
         }
@@ -149,11 +147,7 @@ public class AuthController {
             return ResponseEntity.badRequest()
                     .body(Map.of("message", "아이디는 4자 이상이어야 합니다."));
         }
-        if (request.getPassword() == null || request.getPassword().length() < 8 || request.getPassword().length() > 16
-                || !request.getPassword().matches(".*[A-Z].*")
-                || !request.getPassword().matches(".*[a-z].*")
-                || !request.getPassword().matches(".*[0-9].*")
-                || !request.getPassword().matches(".*[!@#$%^&*()_+\\-=\\[\\]{};':\"\\\\|,.<>/?].*")) {
+        if (!isValidPassword(request.getPassword())) {
             return ResponseEntity.badRequest()
                     .body(Map.of("message", "비밀번호는 8~16자, 영문 대/소문자, 숫자, 특수문자를 포함해야 합니다."));
         }
@@ -161,7 +155,7 @@ public class AuthController {
             return ResponseEntity.badRequest()
                     .body(Map.of("message", "이름은 2자 이상 한글 또는 영문만 입력하세요."));
         }
-        if (request.getEmail() == null || !request.getEmail().trim().matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$")) {
+        if (!isValidEmail(request.getEmail())) {
             return ResponseEntity.badRequest()
                     .body(Map.of("message", "올바른 이메일을 입력하세요."));
         }
@@ -177,5 +171,19 @@ public class AuthController {
                 request.getEmail()
         );
         return ResponseEntity.ok(Map.of("message", "회원가입이 완료되었습니다."));
+    }
+
+    private boolean isValidEmail(String email) {
+        return email != null && email.trim().matches(EMAIL_REGEX);
+    }
+
+    private boolean isValidPassword(String password) {
+        return password != null
+            && password.length() >= 8
+            && password.length() <= 16
+            && password.matches(".*[A-Z].*")
+            && password.matches(".*[a-z].*")
+            && password.matches(".*[0-9].*")
+            && password.matches(".*[!@#$%^&*()_+\\-=\\[\\]{};':\"\\\\|,.<>/?].*");
     }
 }
