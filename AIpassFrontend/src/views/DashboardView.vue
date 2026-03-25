@@ -659,7 +659,7 @@ onUnmounted(() => {
 <style scoped>
 .dashboard-page {
   padding: 28px 32px;
-  background: #F4F6FA;
+  background: transparent;
   min-height: 100%;
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
 }

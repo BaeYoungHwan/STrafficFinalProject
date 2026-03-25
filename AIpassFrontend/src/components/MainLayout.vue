@@ -5,7 +5,9 @@
     <div class="content-area">
       <aside class="side-panel left-panel"></aside>
       <main class="main-content">
-        <router-view />
+        <div class="page-card">
+          <router-view />
+        </div>
       </main>
       <aside class="side-panel right-panel"></aside>
     </div>
@@ -45,5 +47,17 @@ import Footer from './Footer.vue'
   flex: 1;
   padding: 24px 32px;
   background: #F4F6FA;
+}
+
+.page-card {
+  background: #FFFFFF;
+  border-radius: 16px;
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.06),
+    0 4px 16px rgba(0, 0, 0, 0.10),
+    0 8px 32px rgba(0, 0, 0, 0.06);
+  border: 1px solid rgba(226, 232, 240, 0.6);
+  min-height: calc(100vh - 120px);
+  overflow: hidden;
 }
 </style>

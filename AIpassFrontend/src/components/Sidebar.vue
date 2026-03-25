@@ -27,8 +27,7 @@ const route = useRoute()
 
 const menuItems = [
   { label: '메인', path: '/' },
-  { label: '교통/신호 제어', path: '/traffic' },
-  { label: 'CCTV', path: '/cctv' },
+{ label: 'CCTV', path: '/cctv' },
   { label: '단속 내역', path: '/enforcement' },
   { label: '설비 예지보전', path: '/predictive' },
   { label: '통계', path: '/statistics' }
