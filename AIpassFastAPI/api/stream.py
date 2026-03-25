@@ -1,3 +1,4 @@
+import os
 import queue
 import asyncio
 import logging
@@ -9,6 +10,7 @@ from pydantic import BaseModel
 
 from services.vision import vision_engine
 from services.aggregator import congestion_engine
+from services.webhook_client import webhook_client
 import services.violation_cache as vcache
 
 logger = logging.getLogger(__name__)
@@ -111,3 +113,23 @@ async def get_violations(limit: int = 20):
             "violations": vcache.get_recent(limit),
         },
     }
+
+
+# ─────────────────────────────────────────────────────────────
+# DLQ 수동 재전송
+# ─────────────────────────────────────────────────────────────
+
+@router.post("/stream/retry-dlq", summary="DLQ 실패 이벤트 즉시 재전송")
+async def retry_dlq():
+    """data/fallback_queue.jsonl에 쌓인 전송 실패 이벤트를 Spring Boot로 즉시 재전송.
+    Spring Boot 재시작 후 호출하여 누락 단속내역을 복구할 때 사용."""
+    dlq_path = "data/fallback_queue.jsonl"
+    if not os.path.exists(dlq_path):
+        return {"success": True, "message": "DLQ 파일 없음 (재전송할 항목 없음)", "pending": 0}
+    try:
+        with open(dlq_path, "r", encoding="utf-8") as f:
+            pending = sum(1 for line in f if line.strip())
+    except Exception:
+        pending = -1
+    await webhook_client.retry_failed_payloads()
+    return {"success": True, "message": "DLQ 재전송 완료", "pending": pending}

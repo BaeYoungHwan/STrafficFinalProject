@@ -1,23 +1,20 @@
 <template>
   <div class="enforcement">
-    <!-- 실시간 과속 확인 -->
-    <div class="speed-banner">
-      <span class="speed-banner-label">* 실시간 과속 확인</span>
-      <button class="speed-banner-link" @click="showStreamModal = true">더보기</button>
-    </div>
-
-    <div class="section-divider"></div>
-
     <!-- 위반 차량 상세 정보 조회 -->
     <div class="section-header">
       <h2 class="section-title">* 위반 차량 상세 정보 조회</h2>
-      <button class="btn-refresh" @click="fetchList" title="새로 고침">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
-          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-        </svg>
-        새로 고침
-      </button>
+      <div class="section-actions">
+        <button class="btn-cctv" @click="showStreamModal = true" title="실시간 과속 감지 모니터">
+          <img src="/icons/CCTV.png" alt="CCTV" class="cctv-icon" />
+        </button>
+        <button class="btn-refresh" @click="fetchList" title="새로 고침">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+          </svg>
+          새로 고침
+        </button>
+      </div>
     </div>
 
     <!-- 필터 패널 -->
@@ -231,18 +228,17 @@
         <span>실시간 과속 감지 모니터</span>
         <button class="btn-close" @click="showStreamModal = false">✕</button>
       </div>
-      <iframe
+      <img
         :src="streamUrl"
         class="stream-img"
-        frameborder="0"
-        allowfullscreen
-      ></iframe>
+        alt="실시간 과속 감지 스트림"
+      />
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import api from '../api'
 
 const items = ref([])
@@ -257,6 +253,11 @@ const editSuccess = ref(false)
 
 // 스트리밍 모달
 const showStreamModal = ref(false)
+watch(showStreamModal, (val) => {
+  const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth
+  document.body.style.overflow = val ? 'hidden' : ''
+  document.body.style.paddingRight = val ? scrollbarWidth + 'px' : ''
+})
 const streamUrl = ref('')
 
 const page = ref(1)
@@ -402,37 +403,6 @@ onMounted(() => {
   min-height: 100%;
 }
 
-/* 실시간 과속 확인 배너 */
-.speed-banner {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 14px;
-}
-
-.speed-banner-label {
-  font-size: 15px;
-  font-weight: 600;
-  color: #1A1A2E;
-}
-
-.speed-banner-link {
-  font-size: 13px;
-  color: #6B7280;
-  text-decoration: none;
-  transition: color 0.2s;
-}
-
-.speed-banner-link:hover {
-  color: #1A6DCC;
-}
-
-.section-divider {
-  height: 1px;
-  background: #E2E8F0;
-  margin-bottom: 20px;
-}
-
 /* 섹션 헤더 */
 .section-header {
   display: flex;
@@ -466,6 +436,28 @@ onMounted(() => {
 .btn-refresh:hover {
   background: #1457A8;
   transform: translateY(-1px);
+}
+
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-cctv {
+  background: none;
+  border: 1px solid #2a2a4a;
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+
+.cctv-icon {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
 }
 
 /* 필터 패널 */
@@ -1020,14 +1012,6 @@ tbody tr.selected {
   height: 480px;
   border: none;
   background: #000;
-}
-
-/* speed-banner-link를 button으로 변경 시 스타일 유지 */
-button.speed-banner-link {
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 0;
 }
 
 @media (max-width: 900px) {

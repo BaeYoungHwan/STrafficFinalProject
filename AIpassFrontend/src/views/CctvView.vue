@@ -267,7 +267,7 @@ onBeforeUnmount(() => {
 /* 페이지 */
 .cctv-page {
   padding: 28px 32px;
-  background: #F4F6FA;
+  background: transparent;
   min-height: 100%;
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
 }
