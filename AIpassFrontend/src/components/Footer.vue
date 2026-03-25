@@ -11,10 +11,18 @@
         <span>HA JAEYOUNG</span>
        </div>
       <div class="footer-logos">
-        <img :src="kdtLogo" alt="K-Digital Training" class="logo-img" />
-        <img :src="itsKoreaLogo" alt="ITS KOREA" class="logo-img" />
-        <img :src="mbcLogo" alt="MBC아카데미 컴퓨터교육센터" class="logo-img" />
-        <img :src="sTrafficLogo" alt="S-Traffic" class="logo-img" />
+        <a href="https://www.moel.go.kr/index.do" target="_blank" rel="noopener noreferrer">
+          <img :src="kdtLogo" alt="K-Digital Training" class="logo-img" />
+        </a>
+        <a href="https://itskorea.kr/main.do" target="_blank" rel="noopener noreferrer">
+          <img :src="itsKoreaLogo" alt="ITS KOREA" class="logo-img" />
+        </a>
+        <a href="https://www.mbccomputer.co.kr/front/home" target="_blank" rel="noopener noreferrer">
+          <img :src="mbcLogo" alt="MBC아카데미 컴퓨터교육센터" class="logo-img" />
+        </a>
+        <a href="https://www.straffic.co.kr/" target="_blank" rel="noopener noreferrer">
+          <img :src="sTrafficLogo" alt="S-Traffic" class="logo-img" />
+        </a>
       </div>
       <div class="footer-brand">
         <img :src="aipassLogo" alt="AI-PASS" class="footer-logo-img" />
