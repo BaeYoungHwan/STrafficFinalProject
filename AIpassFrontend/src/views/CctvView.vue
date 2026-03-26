@@ -82,7 +82,7 @@
             </div>
             <button class="modal-close" @click="closeModal">✕</button>
           </div>
-          <video ref="modalVideo" class="modal-video" autoplay muted playsinline></video>
+          <div ref="modalVideoContainer" class="modal-video"></div>
         </div>
       </div>
     </Teleport>
@@ -105,7 +105,7 @@ const hlsMap = {}
 
 // ─── 모달 상태 ───────────────────────────────────────────────────────────────
 const selectedCctv = ref(null)
-const modalVideo = ref(null)
+const modalVideoContainer = ref(null)
 let modalHls = null
 
 // ─── Intersection Observer ────────────────────────────────────────────────────
@@ -197,27 +197,33 @@ const fetchList = async () => {
 }
 
 // ─── 모달 제어 ────────────────────────────────────────────────────────────────
-const openModal = async (cctv) => {
+const openModal = (cctv) => {
   selectedCctv.value = cctv
-  await nextTick()
-  const video = modalVideo.value
-  if (!video || !cctv.streamUrl) return
-
-  if (modalHls) { modalHls.destroy(); modalHls = null }
-
-  if (Hls.isSupported()) {
-    modalHls = new Hls({ enableWorker: false })
-    modalHls.loadSource(cctv.streamUrl)
-    modalHls.attachMedia(video)
-  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-    video.src = cctv.streamUrl
-  }
 }
 
+watch(selectedCctv, async (cctv) => {
+  if (!cctv) return
+  await nextTick()
+  // 카드 video 요소를 모달 컨테이너로 DOM 이동 (HLS 인스턴스 유지 → 새 연결 없음)
+  const container = modalVideoContainer.value || document.querySelector('.modal-video')
+  const cardVideo = videoRefs.value[cctv.cctvId]
+  if (container && cardVideo) {
+    container.appendChild(cardVideo)
+  }
+})
+
 const closeModal = () => {
-  if (modalHls) { modalHls.destroy(); modalHls = null }
-  if (modalVideo.value) modalVideo.value.src = ''
+  const closingCctv = selectedCctv.value
   selectedCctv.value = null
+  // 카드 video 요소 원위치 복원
+  if (closingCctv?.cctvId) {
+    const cardEl = cardRefs[closingCctv.cctvId]
+    const movedVideo = document.querySelector('.modal-video video')
+    if (movedVideo && cardEl) {
+      const overlay = cardEl.querySelector('.cctv-overlay')
+      cardEl.insertBefore(movedVideo, overlay || null)
+    }
+  }
 }
 
 // ─── Page Visibility API ──────────────────────────────────────────────────────
@@ -572,5 +578,13 @@ onBeforeUnmount(() => {
   aspect-ratio: 16 / 9;
   display: block;
   background: #000;
+  overflow: hidden;
+}
+
+.modal-video video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 </style>
