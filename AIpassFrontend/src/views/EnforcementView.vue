@@ -143,54 +143,56 @@
 
         <!-- 상세 정보 테이블 -->
         <table class="detail-table">
-          <tr>
-            <th>번호</th>
-            <td>{{ selectedItem.violationId }}</td>
-          </tr>
-          <tr>
-            <th>차량번호</th>
-            <td>
-              <template v-if="!editMode">{{ selectedItem.plateNumber }}</template>
-              <input v-else v-model="editForm.plateNumber" class="edit-input" />
-            </td>
-          </tr>
-          <tr>
-            <th>위반유형</th>
-            <td>
-              <template v-if="!editMode">{{ selectedItem.violationType }}</template>
-              <select v-else v-model="editForm.violationType" class="edit-select">
-                <option>과속</option>
-                <option>신호위반</option>
-                <option>중앙선 침범</option>
-                <option>차선 위반</option>
-              </select>
-            </td>
-          </tr>
-          <tr v-if="selectedItem.speedKmh">
-            <th>속도</th>
-            <td>{{ selectedItem.speedKmh }} km/h</td>
-          </tr>
-          <tr>
-            <th>위치</th>
-            <td>강화대교</td>
-          </tr>
-          <tr>
-            <th>상태</th>
-            <td>
-              <template v-if="!editMode">
-                <span class="badge" :class="statusClass(selectedItem)">{{ statusLabel(selectedItem) }}</span>
-              </template>
-              <select v-else v-model="editForm.fineStatus" class="edit-select">
-                <option>대기중</option>
-                <option>승인</option>
-                <option>반려</option>
-              </select>
-            </td>
-          </tr>
-          <tr>
-            <th>등록시간</th>
-            <td>{{ selectedItem.detectedAt }}</td>
-          </tr>
+          <tbody>
+            <tr>
+              <th>번호</th>
+              <td>{{ selectedItem.violationId }}</td>
+            </tr>
+            <tr>
+              <th>차량번호</th>
+              <td>
+                <template v-if="!editMode">{{ selectedItem.plateNumber }}</template>
+                <input v-else v-model="editForm.plateNumber" class="edit-input" />
+              </td>
+            </tr>
+            <tr>
+              <th>위반유형</th>
+              <td>
+                <template v-if="!editMode">{{ selectedItem.violationType }}</template>
+                <select v-else v-model="editForm.violationType" class="edit-select">
+                  <option>과속</option>
+                  <option>신호위반</option>
+                  <option>중앙선 침범</option>
+                  <option>차선 위반</option>
+                </select>
+              </td>
+            </tr>
+            <tr v-if="selectedItem.speedKmh">
+              <th>속도</th>
+              <td>{{ selectedItem.speedKmh }} km/h</td>
+            </tr>
+            <tr>
+              <th>위치</th>
+              <td>강화대교</td>
+            </tr>
+            <tr>
+              <th>상태</th>
+              <td>
+                <template v-if="!editMode">
+                  <span class="badge" :class="statusClass(selectedItem)">{{ statusLabel(selectedItem) }}</span>
+                </template>
+                <select v-else v-model="editForm.fineStatus" class="edit-select">
+                  <option>대기중</option>
+                  <option>승인</option>
+                  <option>반려</option>
+                </select>
+              </td>
+            </tr>
+            <tr>
+              <th>등록시간</th>
+              <td>{{ selectedItem.detectedAt }}</td>
+            </tr>
+          </tbody>
         </table>
 
         <!-- 완료 안내 문구 -->
