@@ -59,18 +59,45 @@
           <p class="field-hint" :class="{ 'hint-ok': nameValid }">★ 필수 입력 항목입니다.</p>
         </div>
 
-        <!-- E-mail -->
+        <!-- E-mail + 인증 -->
         <div class="form-group">
-          <div class="input-group">
+          <div class="input-group input-row">
             <input
               v-model="form.email"
               type="email"
               placeholder="E-mail"
               autocomplete="email"
-              @input="resetField('email')"
+              @input="resetField('email'); emailVerified = false; codeSent = false; verifyCode = ''"
+              :disabled="emailVerified"
             />
+            <button
+              type="button"
+              class="btn-check"
+              @click="sendEmailCode"
+              :disabled="!emailValid || codeSending || emailVerified"
+            >
+              {{ emailVerified ? '인증완료' : '인증요청' }}
+            </button>
           </div>
-          <p class="field-hint" :class="{ 'hint-ok': emailValid }">★ 필수 입력 항목입니다.</p>
+          <div v-if="codeSent && !emailVerified" class="input-group input-row" style="margin-top: 6px;">
+            <input
+              v-model="verifyCode"
+              type="text"
+              placeholder="인증코드 6자리"
+              maxlength="6"
+            />
+            <button
+              type="button"
+              class="btn-check"
+              @click="checkEmailCode"
+              :disabled="verifyCode.length !== 6"
+            >
+              확인
+            </button>
+          </div>
+          <p v-if="errors.email" class="field-error">★ {{ errors.email }}</p>
+          <p v-else-if="emailVerified" class="field-success">★ 이메일 인증이 완료되었습니다.</p>
+          <p v-else class="field-hint" :class="{ 'hint-ok': emailValid }">★ 필수 입력 항목입니다.</p>
         </div>
 
         <p v-if="globalError" class="global-error">{{ globalError }}</p>
@@ -143,6 +170,36 @@ const emailValid = computed(() =>
   /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(form.email.trim())
 )
 
+const codeSent = ref(false)
+const codeSending = ref(false)
+const verifyCode = ref('')
+const emailVerified = ref(false)
+
+const sendEmailCode = async () => {
+  codeSending.value = true
+  try {
+    await api.post('/auth/send-code', { email: form.email })
+    codeSent.value = true
+  } catch {
+    errors.email = '인증코드 발송에 실패했습니다.'
+    triggerShake()
+  } finally {
+    codeSending.value = false
+  }
+}
+
+const checkEmailCode = async () => {
+  try {
+    const res = await api.post('/auth/verify-code', { email: form.email, code: verifyCode.value })
+    if (res.data.verified) {
+      emailVerified.value = true
+    }
+  } catch {
+    errors.email = '인증코드가 일치하지 않거나 만료되었습니다.'
+    triggerShake()
+  }
+}
+
 const resetField = (field) => {
   errors[field] = ''
   globalError.value = ''
@@ -209,6 +266,9 @@ const validate = () => {
     errors.email = form.email.trim().length === 0
       ? '필수 입력 항목입니다.'
       : '올바른 이메일 형식을 입력하세요. (예: user@example.com)'
+    valid = false
+  } else if (!emailVerified.value) {
+    errors.email = '이메일 인증을 완료해주세요.'
     valid = false
   }
 
