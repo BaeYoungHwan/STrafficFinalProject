@@ -1,62 +1,77 @@
 import cv2
 import time
 import logging
+import os
+import random
+import glob as _glob
 import numpy as np
 import queue
 import asyncio
-import multiprocessing
-from multiprocessing import Process, Queue, shared_memory
-from multiprocessing.synchronize import Lock, Event
+from multiprocessing import Process, Queue, shared_memory, Lock, Event
 from ultralytics import YOLO
 from core.config import settings
+from services.webhook_client import webhook_client
+from services.ocr_storage import run_ocr_on_file
+from utils.http_client import http_client
 
 logger = logging.getLogger(__name__)
 
+# carnumber 이미지 목록 캐시 (Process B에서 1회 로드)
+_CARNUMBER_IMAGES: list = []
+
+def _get_carnumber_images() -> list:
+    global _CARNUMBER_IMAGES
+    if not _CARNUMBER_IMAGES:
+        _CARNUMBER_IMAGES = (
+            _glob.glob("data/carnumber/*.jpeg") +
+            _glob.glob("data/carnumber/*.jpg")
+        )
+        logger.info(f"[VisionEngine] carnumber 이미지 {len(_CARNUMBER_IMAGES)}개 로드됨.")
+    return _CARNUMBER_IMAGES
+
+
 def video_reader_worker(rtsp_url: str, meta_queue: Queue, lock: Lock, stop_event: Event):
-    """
-    [독립 프로세스] 무결점(Race-condition free) OpenCV 프레임 수집 워커
-    """
+    """[Process A] 영상 수집 워커 (SharedMemory 사용)"""
+    from core.config import settings as _settings
+    _frame_interval = 1.0 / _settings.STREAM_FPS_LIMIT
+
     cap = None
     shm = None
     try:
-        cap = cv2.VideoCapture(rtsp_url)
-        if not cap.isOpened():
-            logger.error(f"[Vision] Failed to open stream: {rtsp_url}")
+        while not stop_event.is_set():
+            cap = cv2.VideoCapture(rtsp_url)
+            if cap.isOpened():
+                break
+            logger.warning(f"[Vision] Cannot open stream, retrying in 3s: {rtsp_url}")
+            time.sleep(3)
+        else:
             return
 
-        logger.info(f"[Vision] Started reading stream from {rtsp_url}")
-        
-        # 첫 프레임 기반 SharedMemory 할당
         ret, frame = cap.read()
-        if not ret:
-            return
-            
+        if not ret: return
+
         shm_size = frame.nbytes
         shm = shared_memory.SharedMemory(create=True, size=shm_size)
         shm_name = shm.name
-        
-        # [QA 해결 2.2] Event 기반의 Graceful Shutdown 루프 적용
+
         while not stop_event.is_set():
+            _t0 = time.time()
+
             ret, frame = cap.read()
             if not ret:
-                logger.warning("[Vision] Stream disconnected. Attempting reconnect...")
-                if cap:
-                    cap.release() 
+                if cap: cap.release()
                 time.sleep(2)
                 cap = cv2.VideoCapture(rtsp_url)
                 continue
-            
-            # [QA 해결 3.1] 재연결 시 해상도(바이트 크기) 변조 검증
+
             if frame.nbytes != shm_size:
-                logger.error("[Vision] Resolution changed during reconnect! Exiting worker to prevent memory corruption.")
-                break # 워커 종료 후 Engine에서 재시작 유도 필요
-                
+                logger.error("[Vision] Resolution changed! Exiting worker.")
+                break
+
             shared_array = np.ndarray(frame.shape, dtype=frame.dtype, buffer=shm.buf)
-            
-            # [QA 해결 2.1] Lock을 통한 쓰기(Write) 동기화 보장
             with lock:
                 np.copyto(shared_array, frame)
-            
+
             meta = {'shm_name': shm_name, 'shape': frame.shape, 'dtype': frame.dtype}
             try:
                 meta_queue.put_nowait(meta)
@@ -66,85 +81,208 @@ def video_reader_worker(rtsp_url: str, meta_queue: Queue, lock: Lock, stop_event
                     meta_queue.put_nowait(meta)
                 except queue.Empty:
                     pass
-                    
+
+            elapsed = time.time() - _t0
+            if elapsed < _frame_interval:
+                time.sleep(_frame_interval - elapsed)
+
     except Exception as e:
         logger.error(f"[Vision] Worker error: {e}")
     finally:
-        # [QA 해결 2.2] terminate()를 피했기 때문에 OS 자원이 무조건 안전하게 해제됨
-        logger.info("[Vision] Cleaning up OpenCV and SharedMemory resources...")
-        if cap:
-            cap.release()
+        if cap: cap.release()
         if shm:
             shm.close()
             shm.unlink()
 
+
+def ai_inference_worker(meta_queue: Queue, event_queue: Queue, mjpeg_queue: Queue, lock: Lock, stop_event: Event):
+    """[Process B] 무거운 AI 연산 및 시각화 렌더링 워커"""
+    logger.info(f"[AI Engine] Process started. Loading {settings.YOLO_MODEL}...")
+    model = YOLO(settings.YOLO_MODEL)
+
+    from services.speed_detector import (
+        process_headless_inference,
+        vehicle_history,
+        SPEED_LIMIT_KMH,
+        MAX_PLAUSIBLE_SPEED_KMH,
+    )
+
+    def safe_put(event_data):
+        try:
+            event_queue.put_nowait(event_data)
+        except queue.Full:
+            pass
+
+    _infer_counter = 0
+    _last_results = None
+
+    while not stop_event.is_set():
+        try:
+            meta = meta_queue.get(timeout=1.0)
+        except queue.Empty:
+            continue
+
+        existing_shm = shared_memory.SharedMemory(name=meta['shm_name'])
+        try:
+            with lock:
+                frame = np.ndarray(meta['shape'], dtype=meta['dtype'], buffer=existing_shm.buf).copy()
+        finally:
+            existing_shm.close()
+
+        # 2프레임에 1회만 YOLO 추론 — 나머지는 이전 결과 재사용으로 CPU 부하 절반 감소
+        _infer_counter += 1
+        _is_new_result = True
+        if _infer_counter % 2 == 0 and _last_results is not None:
+            results = _last_results
+            _is_new_result = False
+        else:
+            results = model.track(frame, persist=True, tracker="bytetrack.yaml", verbose=False,
+                                  imgsz=settings.INFERENCE_IMGSZ, conf=settings.CONF_THRESHOLD,
+                                  classes=settings.TARGET_CLASSES)
+            _last_results = results
+
+        # [과속 감지] 새 추론 결과일 때만 속도 업데이트 — 재사용 프레임은 동일 위치로 speed≈0이 되어 EMA를 왜곡함
+        speeding_events = process_headless_inference(results) if _is_new_result else []
+
+        # 과속 감지된 차량에 대해 carnumber 랜덤 이미지 선정 후 이벤트 큐에 적재
+        carnumber_images = _get_carnumber_images()
+        for evt in speeding_events:
+            if not carnumber_images:
+                logger.warning("[VisionEngine] carnumber 이미지 없음. 과속 이벤트 스킵.")
+                continue
+            src_path = random.choice(carnumber_images)
+            evt["payload"]["src_image_path"] = src_path
+            safe_put({"type": "SPEEDING_VIOLATION", "payload": evt["payload"]})
+
+        # [Web Demo] 시각화 렌더링
+        annotated_frame = results[0].plot(labels=False)
+        resized_frame = cv2.resize(annotated_frame, (640, 480))
+
+        # [과속 오버레이] 각 차량 bbox 위에 속도 텍스트 표시
+        if results[0].boxes and results[0].boxes.id is not None:
+            id_list = results[0].boxes.id.int().cpu().tolist()
+            scale_x = 640 / frame.shape[1]
+            scale_y = 480 / frame.shape[0]
+            for i, track_id in enumerate(id_list):
+                data = vehicle_history.get(track_id)
+                if data is None:
+                    continue
+                raw_speed = data.get("ema_speed", 0.0)
+                speed = min(raw_speed * settings.SPEED_SCALE_FACTOR, MAX_PLAUSIBLE_SPEED_KMH)
+                if speed <= 0:
+                    continue
+                box = results[0].boxes[i]
+                x_center, y_center, width, _ = box.xywh[0].tolist()
+                x_px = int((x_center - width / 2) * scale_x)
+                y_px = max(0, int(y_center * scale_y) - 10)
+                if speed >= 70:
+                    color = (0, 0, 255)
+                elif speed >= 60:
+                    color = (0, 220, 0)
+                elif speed >= 50:
+                    color = (255, 255, 255)
+                else:
+                    continue
+                label = f"ID:{track_id} {speed:.0f}km/h"
+                cv2.putText(resized_frame, label, (x_px, y_px),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
+
+
+
+        ret, buffer = cv2.imencode('.jpg', resized_frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
+        if ret:
+            frame_bytes = buffer.tobytes()
+            try:
+                mjpeg_queue.put_nowait(frame_bytes)
+            except queue.Full:
+                try:
+                    mjpeg_queue.get_nowait()
+                    mjpeg_queue.put_nowait(frame_bytes)
+                except queue.Full:
+                    pass
+
+
+async def _handle_speeding_violation(payload: dict):
+    """과속 이벤트: carnumber 이미지에 OCR 실행 → webhook 전송"""
+    payload["cameraId"] = vision_engine.camera_id
+    src_path = payload.pop("src_image_path", None)
+    if src_path:
+        payload["srcImageUrl"] = f"carnumber/{os.path.basename(src_path)}"
+
+    if src_path and os.path.exists(src_path):
+        result = await run_ocr_on_file(src_path)
+        payload["plateNumber"] = result["plate_number"]
+        payload["imageUrl"] = result["image_url"]   # "numberplate/filename.jpg" (프론트에서 prefix 추가)
+        payload["needsReview"] = result.get("needs_review", False)
+        logger.info(f"[Speeding] OCR 완료 — 번호판: {result['plate_number']} | 이미지: {result['image_url']} | 수동검토: {result.get('needs_review', False)}")
+    else:
+        payload["plateNumber"] = "미인식"
+        payload["imageUrl"] = None
+        logger.warning(f"[Speeding] carnumber 이미지 없음 — 미인식 처리")
+
+    await webhook_client.send_violation(payload)
+
+
+async def _handle_speeding_violation_safe(payload: dict):
+    """예외 격리 래퍼: 과속 처리 실패가 이벤트 루프에 전파되지 않도록 보호"""
+    try:
+        await _handle_speeding_violation(payload)
+    except Exception as e:
+        logger.error(f"[Speeding] 위반 처리 예외: {e}")
+
+
 class VisionEngine:
     def __init__(self, rtsp_url: str):
         self.rtsp_url = rtsp_url
+        self.camera_id: str = settings.CAMERA_ID
         self.meta_queue = Queue(maxsize=3)
-        self.latest_annotated_frame = None
+        self.event_queue = Queue(maxsize=100)
+        self.mjpeg_queue = Queue(maxsize=10)
+
         self.reader_process = None
-        
-        # [QA 해결 2.1 & 2.2] 동기화 및 종료 신호 객체 생성
+        self.ai_process = None
         self.lock = Lock()
         self.stop_event = Event()
-        
-        logger.info("[Vision] Loading YOLOv8 model...")
-        self.model = YOLO("yolov8n.pt") 
 
     def start(self):
         self.stop_event.clear()
-        self.reader_process = Process(
-            target=video_reader_worker, 
-            args=(self.rtsp_url, self.meta_queue, self.lock, self.stop_event), 
-            daemon=True
-        )
+        self.reader_process = Process(target=video_reader_worker, args=(self.rtsp_url, self.meta_queue, self.lock, self.stop_event))
+        self.ai_process = Process(target=ai_inference_worker, args=(self.meta_queue, self.event_queue, self.mjpeg_queue, self.lock, self.stop_event))
+
         self.reader_process.start()
+        self.ai_process.start()
 
-    async def process_inference_loop(self):
-        """메인 이벤트 루프 블로킹 방지를 위한 비동기 추론 루프"""
-        try:
-            meta = await asyncio.to_thread(self.meta_queue.get, True, 5.0)
-        except queue.Empty:
-            return
-        except Exception as e:
-            logger.error(f"Queue error: {e}")
-            return
-
-        def _read_shared_memory():
-            """스레드 풀 내부에서 Lock을 쥐고 프레임을 복사해오는 안전한 함수"""
-            existing_shm = shared_memory.SharedMemory(name=meta['shm_name'])
+    async def process_event_loop(self):
+        """[Process C] 가벼운 API 통신 및 이벤트 처리 루프"""
+        while not self.stop_event.is_set():
             try:
-                # [QA 해결 2.1] Lock을 통한 읽기(Read) 동기화 보장
-                with self.lock:
-                    safe_frame = np.ndarray(meta['shape'], dtype=meta['dtype'], buffer=existing_shm.buf).copy()
-                return safe_frame
-            finally:
-                existing_shm.close()
+                event = await asyncio.to_thread(self.event_queue.get, True, 0.1)
 
-        # 데이터 오염 없이 안전하게 프레임 획득
-        try:
-            frame = await asyncio.to_thread(_read_shared_memory)
-        except FileNotFoundError:
-            return
+                if event["type"] == "SPEEDING_VIOLATION":
+                    # carnumber 랜덤 이미지 → OCR → webhook 전송
+                    asyncio.create_task(_handle_speeding_violation_safe(event["payload"]))
 
-        # 무거운 추론 작업 스레드 오프로딩
-        results = await asyncio.to_thread(
-            self.model.track, frame, persist=True, tracker="bytetrack.yaml", verbose=False
-        )
-        annotated_frame = results[0].plot()
-
-        resized_frame = await asyncio.to_thread(
-            cv2.resize, annotated_frame, (settings.STREAM_MAX_WIDTH, settings.STREAM_MAX_HEIGHT)
-        )
-        self.latest_annotated_frame = resized_frame
+            except queue.Empty:
+                await asyncio.sleep(0.01)
 
     def stop(self):
-        """[QA 해결 2.2] OS 자원 누수 방지를 위한 Graceful Shutdown"""
-        if self.reader_process and self.reader_process.is_alive():
-            logger.info("[Vision] Sending stop signal to worker process...")
-            self.stop_event.set() # 워커 루프 중단 신호
-            self.reader_process.join(timeout=5) # 워커의 finally 블록 실행 대기
-            if self.reader_process.is_alive():
-                logger.warning("[Vision] Worker process did not terminate gracefully. Forcing kill.")
-                self.reader_process.terminate() # 최후의 수단
+        self.stop_event.set()
+        if self.reader_process: self.reader_process.join(3)
+        if self.ai_process: self.ai_process.join(3)
+
+    def restart(self, new_url: str):
+        """동영상 소스 URL을 변경하고 프로세스를 재시작한다."""
+        logger.info(f"[Vision] Restarting engine with new source: {new_url}")
+        self.stop()
+        self.rtsp_url = new_url
+        while not self.meta_queue.empty():
+            try: self.meta_queue.get_nowait()
+            except queue.Empty: break
+        while not self.mjpeg_queue.empty():
+            try: self.mjpeg_queue.get_nowait()
+            except queue.Empty: break
+        self.start()
+
+
+# 글로벌 인스턴스
+vision_engine = VisionEngine(rtsp_url=settings.VIDEO_SOURCE_URL)

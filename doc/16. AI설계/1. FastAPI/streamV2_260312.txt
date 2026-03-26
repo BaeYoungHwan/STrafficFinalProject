@@ -1,0 +1,36 @@
+import asyncio
+import queue
+from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
+from services.vision import vision_engine
+
+router = APIRouter()
+
+async def mjpeg_generator():
+    """AI 엔진의 mjpeg_queue에서 압축된 JPEG 바이트를 꺼내어 연속 송출하는 제너레이터"""
+    while True:
+        try:
+            # 블로킹을 막기 위해 비동기로 큐 읽기
+            frame_bytes = await asyncio.to_thread(vision_engine.mjpeg_queue.get, True, 1.0)
+            
+            # MJPEG HTTP 스트림 포맷 구성
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+        except queue.Empty:
+            # 스트림이 끊기지 않도록 약간 대기 후 재시도
+            await asyncio.sleep(0.01)
+        except Exception as e:
+            break
+
+@router.get("/video_feed", tags=["Streaming"])
+async def video_feed():
+    """[Web Demo] 실시간 교차로 AI 분석 영상 스트리밍 엔드포인트"""
+    return StreamingResponse(
+        mjpeg_generator(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate", # 브라우저 캐싱 완벽 차단
+            "Pragma": "no-cache",
+            "Expires": "0"
+        }
+    )

@@ -1,0 +1,232 @@
+# AI-PASS DB 추가·수정 항목 안내
+> 작성일: 2026-03-20
+> 기준: ERD_260319.pgerd (기존 8개 테이블)
+> 범위: 하재영 담당 파트 연동에 필요한 항목만 기재
+
+---
+
+## 한 줄 요약
+
+기존 ERD 8개 테이블에서 **기존 테이블 1개 컬럼 수정 + 신규 테이블 5개 추가**가 필요합니다.
+
+---
+
+## 기존 테이블 변경
+
+### sensor_log — `motor_current DECIMAL(6,2)` 추가
+
+예지보전 ML 모델(XGBoost)의 입력 피처는 3개입니다.
+
+| 피처 | 설명 | 데이터 출처 |
+|------|------|------------|
+| `vibration` | 진동 RMS | Mendeley KAIST 기반 더미 생성 |
+| `temperature` | 설비 자체 온도 | Mendeley KAIST 기반 더미 생성 |
+| `motor_current` | 모터 전류 (A) | **더미 생성 후 주입 — 컬럼 추가 필요** |
+
+실제 센서 장비가 없기 때문에 `motor_current`는 `vibration`, `temperature`와의
+상관관계를 반영한 더미 데이터를 생성하여 주입합니다.
+컬럼이 없으면 더미 데이터를 적재할 수 없으므로 추가가 필요합니다.
+
+---
+
+## 신규 테이블 5개
+
+### 1. `cctv_info` — ITS CCTV 정보
+
+**연결 화면:** CCTV 모니터링
+
+현재 ERD에 CCTV 관련 테이블이 없습니다.
+CCTV 모니터링 화면에서 스트림을 재생하려면
+ITS API에서 수집한 URL·위치 정보를 저장할 테이블이 필요합니다.
+
+**수집 방식:** ITS 국가교통정보센터 API → Spring Boot 스케줄러 → 1시간 주기 UPSERT
+
+**실제 API 응답에서 전처리하는 내용**
+
+ITS CCTV API 응답에는 `cctvid` 필드가 없습니다.
+`cctvurl` 경로에서 서버 번호를 추출하여 PK로 사용합니다.
+
+```
+원본: "cctvurl": "http://cctvsec.ktict.co.kr/4700/USfmu..."
+전처리: URL 경로 첫 번째 세그먼트 추출
+결과: cctv_id = "4700"
+```
+
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| `cctv_id` | VARCHAR(50) PK | cctvurl 서버 번호 추출값 |
+| `cctv_name` | VARCHAR(200) NOT NULL | 설치 지점명 |
+| `road_name` | VARCHAR(200) | 도로명 |
+| `latitude` | DECIMAL(10,8) | coordy 변환값 — NULL 허용 |
+| `longitude` | DECIMAL(11,8) | coordx 변환값 — NULL 허용 |
+| `stream_url` | VARCHAR(500) | HLS URL 원본 |
+| `district` | VARCHAR(50) | 자치구, 분할 조회용 |
+| `is_active` | BOOLEAN | 운영 여부 |
+| `updated_at` | TIMESTAMP | 최근 갱신 시각 |
+
+> `intersection`과 현재 독립 구조. 추후 좌표 근접 매핑 후 FK 연결 예정.
+
+---
+
+### 2. `traffic_flow_log` — ITS 교통소통정보
+
+**연결 화면:** 대시보드 (교통소통 차트)
+
+기존 `traffic_congestion`은 YOLO 카운팅 기반 교차로 단위 데이터입니다.
+ITS API 교통소통정보는 도로 구간 단위이며 성격이 다릅니다.
+
+| 구분 | `traffic_congestion` | `traffic_flow_log` |
+|------|---------------------|-------------------|
+| 출처 | YOLOv8 카운팅 | ITS API |
+| 단위 | 교차로 1개 | 도로 구간 |
+| 갱신 | 실시간 | 5분 주기 |
+| 용도 | 관제 지도 핀 색상 | 대시보드 소통 차트 |
+
+**수집 방식:** `its_route` 테이블 활성 노선 조회 → 노선 × 방향(시점/종점) 반복 호출 → 5분 주기 INSERT
+
+**실제 API 응답에서 전처리하는 내용**
+
+| API 원본 필드 | 전처리 | 저장 컬럼 |
+|-------------|--------|---------|
+| `linkId` | 그대로 저장 | link_id |
+| `roadName` | 그대로 저장 | road_name |
+| `speed` | String → Decimal 변환 | speed |
+| `roadDrcType` | "시점" → UP / "종점" → DOWN | direction |
+| `createdDate` | "20260320123000" → LocalDateTime 파싱 | collected_at |
+| 없음 | speed 기준 직접 계산 | congestion_level |
+
+**혼잡도 계산 기준** (API에서 혼잡도 코드 미제공 → speed 기반 직접 계산)
+
+| speed | congestion_level |
+|-------|----------------|
+| 60 km/h 이상 | SMOOTH |
+| 30~59 km/h | SLOW |
+| 30 km/h 미만 | CONGESTED |
+
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| `flow_id` | BIGSERIAL PK | |
+| `link_id` | VARCHAR(50) | ITS API linkId (구간 고유 식별자) |
+| `road_name` | VARCHAR(200) | 예: "국도48호선" |
+| `speed` | DECIMAL(6,2) | String → Decimal 변환값 |
+| `congestion_level` | VARCHAR(20) | speed 기반 계산값 |
+| `direction` | VARCHAR(10) | 시점→UP / 종점→DOWN 변환값 |
+| `route_no` | VARCHAR(10) | 노선 번호 (예: 0480) |
+| `collected_at` | TIMESTAMP NOT NULL | createdDate 파싱값 |
+| `created_at` | TIMESTAMP | DB 적재 시각 |
+
+---
+
+### 3. `its_route` — 수집 노선 설정
+
+**연결 화면:** 없음 (스케줄러 설정용)
+
+ITS 교통소통 API에서 `type=its` 사용 시
+노선 번호(`routeNo`)와 방향(`drcType`)이 필수 파라미터입니다.
+
+수집 대상 노선을 코드에 하드코딩하면 노선 추가·제거 시 재배포가 필요합니다.
+이 테이블에 INSERT 한 줄만 실행하면 다음 스케줄러 실행부터 자동 수집됩니다.
+
+```sql
+-- routeNo 확인 후 실행
+INSERT INTO its_route (route_no, route_name, collect_up, collect_down, memo)
+VALUES ('0480', '국도 48호선', TRUE, TRUE, '강화도 방면');
+```
+
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| `route_id` | BIGSERIAL PK | |
+| `route_no` | VARCHAR(10) UNIQUE NOT NULL | ITS API routeNo |
+| `route_name` | VARCHAR(100) | 도로명 |
+| `collect_up` | BOOLEAN | 시점 방향 수집 여부 |
+| `collect_down` | BOOLEAN | 종점 방향 수집 여부 |
+| `is_active` | BOOLEAN | FALSE 변경 시 즉시 수집 중단 |
+| `memo` | VARCHAR(200) | 관리자 메모 |
+| `created_at` | TIMESTAMP | |
+| `updated_at` | TIMESTAMP | |
+
+---
+
+### 4. `weather_log` — 기상청 날씨
+
+**연결 화면:** 예지보전 (ML 피처), 대시보드 (날씨 위젯)
+
+**① 예지보전 ML 모델 필수 입력값**
+
+ML 모델 RUL 예측 시 외부 기온(`ambient_temp`)이 필요합니다.
+Mendeley KAIST 데이터셋의 `temp_atm`(실험실 상수값)은
+실제 운영 환경과 달라 기상청 실제 기온으로 대체합니다.
+
+```
+sensor_log.equipment_id
+  → equipment.intersection_id
+  → weather_log.temperature  ← ML 모델 ambient_temp 피처로 입력
+```
+
+**② 대시보드 날씨 위젯**
+
+관제 대시보드 상단 기상 정보(기온, 강수, 풍속) 표시 데이터 소스입니다.
+
+**수집 방식:** 기상청 초단기실황 API → intersection 위경도 → 격자(nx, ny) 변환 → 1시간 주기 INSERT
+
+> nx, ny는 API 호출 파라미터로만 사용하고 DB에 저장하지 않습니다.
+> intersection 테이블에 위경도가 있으므로 필요 시 GridConverter로 재계산 가능합니다.
+
+**실제 API 응답에서 전처리하는 내용**
+
+| 카테고리 | 전처리 | 저장 컬럼 |
+|---------|--------|---------|
+| T1H | String → Decimal | temperature (ML ambient_temp) |
+| REH | String → Integer | humidity |
+| WSD | String → Decimal | wind_speed |
+| VEC | degree → 16방위 문자열 변환 | wind_direction |
+| RN1 | "강수없음" → 0.0 처리 | precipitation |
+| PTY | 코드 → NONE/RAIN/SNOW/SLEET | precipitation_type |
+| SKY | 코드 → CLEAR/CLOUDY/OVERCAST | sky_condition |
+| VIS | ×10 → 미터 변환 | visibility |
+
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| `weather_id` | BIGSERIAL PK | |
+| `intersection_id` | BIGINT FK NOT NULL | intersection 기준 수집 |
+| `temperature` | DECIMAL(5,2) | T1H — ML ambient_temp 입력값 |
+| `humidity` | INT | REH 변환값 |
+| `wind_speed` | DECIMAL(5,2) | WSD 변환값 |
+| `wind_direction` | VARCHAR(10) | VEC degree → 방위 변환값 |
+| `precipitation` | DECIMAL(5,2) | RN1 ("강수없음" → 0) |
+| `precipitation_type` | VARCHAR(20) | PTY 코드 변환값 |
+| `sky_condition` | VARCHAR(20) | SKY 코드 변환값 |
+| `visibility` | INT | VIS ×10 미터 변환값 |
+| `collected_at` | TIMESTAMP NOT NULL | 수집 시각 |
+| `created_at` | TIMESTAMP | DB 적재 시각 |
+
+---
+
+### 5. `its_collect_log` — 스케줄러 수집 이력
+
+**연결 화면:** 없음 (운영 모니터링용)
+
+5분/1시간마다 자동 실행되는 스케줄러의 성공/실패 이력을 기록합니다.
+문제 발생 시 원인 파악용으로 사용합니다.
+
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| `log_id` | BIGSERIAL PK | |
+| `collect_type` | VARCHAR(20) NOT NULL | CCTV_INFO / TRAFFIC_FLOW / WEATHER |
+| `status` | VARCHAR(20) NOT NULL | SUCCESS / FAIL |
+| `total_count` | INT | 수집 총 건수 |
+| `new_count` | INT | 신규 저장 건수 |
+| `error_message` | TEXT | 실패 시 예외 메시지 |
+| `executed_at` | TIMESTAMP | 실행 시각 |
+
+---
+
+## 수집 주기 요약
+
+| 테이블 | 주기 | 비고 |
+|--------|------|------|
+| `cctv_info` | 1시간 | UPSERT (ON CONFLICT cctv_id DO UPDATE) |
+| `traffic_flow_log` | 5분 | INSERT 누적 |
+| `weather_log` | 1시간 (정시 05분) | INSERT 누적 |
+| `its_collect_log` | 자동 | 스케줄러 실행마다 기록 |
+| `its_route` | 수동 | INSERT로 노선 추가 |

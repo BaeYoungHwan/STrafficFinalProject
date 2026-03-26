@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.aipass.dao.MemberMapper">
+
+    <select id="findByLoginId" parameterType="String" resultType="com.aipass.dto.MemberDTO">
+        SELECT member_id, login_id, password, name, email, created_at
+        FROM member
+        WHERE login_id = #{loginId}
+    </select>
+
+    <select id="countByLoginId" parameterType="String" resultType="int">
+        SELECT COUNT(*) FROM member WHERE login_id = #{loginId}
+    </select>
+
+    <insert id="insertMember" parameterType="com.aipass.dto.MemberDTO">
+        INSERT INTO member (login_id, password, name, email, created_at)
+        VALUES (#{loginId}, #{password}, #{name}, #{email}, NOW())
+    </insert>
+
+    <select id="findByNameAndEmail" resultType="com.aipass.dto.MemberDTO">
+        SELECT member_id, login_id, name, email, created_at
+        FROM member
+        WHERE name = #{name} AND email = #{email}
+    </select>
+
+    <select id="findByLoginIdAndEmail" resultType="com.aipass.dto.MemberDTO">
+        SELECT member_id, login_id, name, email
+        FROM member
+        WHERE login_id = #{loginId} AND email = #{email}
+    </select>
+
+    <update id="updatePassword">
+        UPDATE member SET password = #{password} WHERE login_id = #{loginId}
+    </update>
+
+    <update id="updateMember" parameterType="com.aipass.dto.MemberDTO">
+        UPDATE member
+        SET name = #{name}, email = #{email}
+        WHERE login_id = #{loginId}
+    </update>
+
+</mapper>

@@ -1,82 +1,100 @@
+import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
 import logging
+import asyncio
+import httpx
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from core.config import settings
 from core.hardware import check_hardware_acceleration
 from services.vision import vision_engine
+from services.aggregator import start_aggregators, stop_aggregators
+from services.webhook_client import webhook_client
+from utils.http_client import http_client
 from api import stream
-import asyncio
 
-
-# 기본 로깅 설정
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 logger = logging.getLogger(__name__)
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # [수정 완료] 예외 처리 및 안전한 자원 해제 구조 도입
+    # ── START-UP ──────────────────────────────────────────────
     try:
-        logger.info(f"Starting {settings.PROJECT_NAME} v{settings.VERSION}")
-        
-        # 1. 하드웨어 점검
+        logger.info("Starting %s v%s", settings.PROJECT_NAME, settings.VERSION)
+
+        os.makedirs("data/numberplate", exist_ok=True)
+        os.makedirs("data/carnumber", exist_ok=True)
+
         check_hardware_acceleration()
-        
-        # TODO: AI 모델 로드, multiprocessing 큐 초기화 등
-        logger.info("All core services initialized successfully.")
-        
+        await http_client.start()
+        await webhook_client.start()
+
+        # Spring Boot에서 AI 대상 CCTV URL 동적 적용 (실패 시 .env fallback)
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as c:
+                resp = await c.get(f"{settings.BACKEND_URL}/api/cctv/ai-target")
+                data = resp.json()
+                if data.get("success") and data.get("data", {}).get("url"):
+                    vision_engine.rtsp_url = data["data"]["url"]
+                    vision_engine.camera_id = data["data"].get("cctvId", settings.CAMERA_ID)
+                    logger.info("[AI-Target] CCTV URL: %s", vision_engine.rtsp_url)
+                else:
+                    logger.warning("[AI-Target] 응답 파싱 실패 — fallback URL 사용")
+        except Exception as e:
+            logger.warning("[AI-Target] Spring Boot 미연결 — fallback URL 사용: %s", e)
+
+        if vision_engine.rtsp_url:
+            vision_engine.start()
+            asyncio.create_task(vision_engine.process_event_loop())
+        else:
+            logger.warning("[Vision] VIDEO_SOURCE_URL 미설정 — 엔진 대기 중. POST /stream/source 로 URL 지정 후 시작 가능.")
+
+        start_aggregators()
+
+        logger.info("[SUCCESS] All services initialized. App is ready.")
         yield
-        
+
     except Exception as e:
-        logger.error(f"[CRITICAL] Failed to initialize core services: {e}")
-        raise e  # 서버 구동 중단
-        
+        logger.error("[CRITICAL] Failed to initialize: %s", e)
+        raise
+
+    # ── SHUT-DOWN ─────────────────────────────────────────────
     finally:
         logger.info("Shutting down gracefully...")
-        # TODO: 자원 해제, Fallback 큐 데이터 SQLite 저장 등
-        logger.info("Shutdown complete.")
+        await stop_aggregators()
+        vision_engine.stop()
+        await webhook_client.stop()
+        await http_client.stop()
+        logger.info("[SUCCESS] Shutdown complete.")
 
-# FastAPI 인스턴스 생성
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
-@app.get("/health")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:8080", "http://localhost:3000", "*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(stream.router, prefix="/api/v1")
+app.mount("/demo", StaticFiles(directory="static", html=True), name="demo")
+app.mount("/images", StaticFiles(directory="data"), name="images")
+
+
+@app.get("/health", tags=["System"])
 async def health_check():
     return {"status": "ok", "message": "AI-Pass Core is running"}
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    try:
-        logger.info(f"Starting {settings.PROJECT_NAME} v{settings.VERSION}")
-        check_hardware_acceleration()
-        
-        vision_engine.start()
-        
-        async def inference_worker():
-            while True:
-                # [QA 반영] 이제 process_inference_loop 자체가 awaitable 비동기 함수입니다.
-                await vision_engine.process_inference_loop()
-                await asyncio.sleep(0.001) # 컨텍스트 스위칭 최소 양보
-                
-        # 워커를 백그라운드 태스크로 등록
-        asyncio.create_task(inference_worker())
-        
-        logger.info("All core services initialized successfully.")
-        yield
-        
-    except Exception as e:
-        logger.error(f"[CRITICAL] Failed to initialize core services: {e}")
-        raise e
-    finally:
-        logger.info("Shutting down gracefully...")
-        vision_engine.stop()
-        logger.info("Shutdown complete.")
-
-app = FastAPI(title=settings.PROJECT_NAME, version=settings.VERSION, lifespan=lifespan)
-app.include_router(stream.router, prefix="/api/v1")

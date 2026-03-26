@@ -1,0 +1,6 @@
+{
+    "python-envs.defaultEnvManager": "ms-python.python:conda",
+    "python-envs.defaultPackageManager": "ms-python.python:conda",
+    "java.jdt.ls.java.home": "C:\\Program Files\\Java\\jdk-17",
+    "java.compile.nullAnalysis.mode": "automatic"
+}

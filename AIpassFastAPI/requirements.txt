@@ -1,0 +1,30 @@
+# AIpass FastAPI — 의존 패키지
+# 설치: pip install -r requirements.txt
+
+# Web Framework
+fastapi==0.135.1
+uvicorn==0.42.0
+python-multipart==0.0.22
+aiofiles==25.1.0
+
+# AI / ML
+ultralytics==8.4.24
+paddleocr==3.4.0
+paddlepaddle==3.3.0
+torch==2.10.0
+torchvision==0.25.0
+
+# Image Processing
+opencv-python==4.12.0.88
+numpy==2.2.6
+Pillow==12.0.0
+
+# HTTP Client
+httpx==0.28.1
+
+# Config & Env
+pydantic-settings==2.13.1
+python-dotenv==1.2.2
+
+# DB (Spring Boot 연동용 직접 쿼리 필요 시)
+psycopg2-binary==2.9.11

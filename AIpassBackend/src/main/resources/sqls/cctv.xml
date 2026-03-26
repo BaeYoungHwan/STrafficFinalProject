@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.aipass.dao.CctvMapper">
+
+    <select id="findAllActive" resultType="com.aipass.dto.CctvDTO">
+        SELECT
+            cctv_id,
+            cctv_name,
+            road_name,
+            stream_url,
+            district,
+            latitude,
+            longitude,
+            is_active,
+            TO_CHAR(updated_at AT TIME ZONE 'Asia/Seoul', 'YY-MM-DD HH24:MI:SS') AS updated_at
+        FROM cctv_info
+        WHERE is_active = true
+        ORDER BY cctv_name ASC
+    </select>
+
+    <select id="findAiTargetCctv" resultType="com.aipass.dto.CctvDTO">
+        SELECT
+            cctv_id,
+            cctv_name,
+            road_name,
+            stream_url,
+            district,
+            latitude,
+            longitude,
+            is_active,
+            TO_CHAR(updated_at AT TIME ZONE 'Asia/Seoul', 'YY-MM-DD HH24:MI:SS') AS updated_at
+        FROM cctv_info
+        WHERE cctv_id = '4700'
+          AND is_active = true
+        LIMIT 1
+    </select>
+
+    <select id="findById" parameterType="String" resultType="com.aipass.dto.CctvDTO">
+        SELECT
+            cctv_id,
+            cctv_name,
+            road_name,
+            stream_url,
+            district,
+            latitude,
+            longitude,
+            is_active,
+            TO_CHAR(updated_at AT TIME ZONE 'Asia/Seoul', 'YY-MM-DD HH24:MI:SS') AS updated_at
+        FROM cctv_info
+        WHERE cctv_id = #{cctvId}
+    </select>
+
+</mapper>

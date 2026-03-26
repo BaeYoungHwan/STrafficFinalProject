@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.aipass.dao.ItsRouteMapper">
+
+    <select id="findActiveRoutes" resultType="com.aipass.dto.ItsRouteDTO">
+        SELECT route_id, route_no, route_name,
+               collect_up, collect_down, is_active, memo,
+               created_at, updated_at
+        FROM its_route
+        WHERE is_active = true
+    </select>
+
+</mapper>

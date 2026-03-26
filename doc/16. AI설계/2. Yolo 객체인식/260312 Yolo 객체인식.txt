@@ -1,0 +1,106 @@
+# AI-Pass_Phase3_Step6_Vision_Plan_V2.md
+
+
+
+## 1. 개요 (Background & Objective)
+
+* **목적:** 교차로 실시간 영상에서 타겟 객체(자동차, 이륜차, 보행자)를 추적(Tracking)하고, 유의미한 이벤트(신규 객체 등장, 차선 통과 등) 발생 시에만 선별적으로 Spring Boot 백엔드로 데이터를 송출한다.
+
+* **대상 파일:** `services/vision.py`
+
+* **사용 모델:** YOLO26 Nano (`yolo26n.pt`)
+
+* **핵심 변경점 (V2):** 프레임 단위 무한 전송으로 인한 백엔드 마비(Data Flood)를 방지하기 위해 **객체 추적(ByteTrack) 기반의 이벤트 송출 아키텍처**로 전면 개편.
+
+
+
+## 2. YOLO26n 성능 극대화 및 최적화 전략
+
+* **NMS-Free 및 해상도(STAL) 튜닝:** 소형 객체(오토바이, 꼬리물기 차량) 인식률을 극대화하기 위해 `config.py`에 추론 해상도(`imgsz=1280` 등)를 환경 변수로 분리하여 현장 화각에 맞게 조절한다.
+
+* **[중장기 로드맵] TensorRT 가속:** MVP 구현 완료 직후, NMS가 제거된 YOLO26의 이점을 살려 PyTorch(`.pt`) 모델을 TensorRT(`.engine`)로 변환, GPU 추론 FPS를 2배 이상 끌어올리는 작업을 계획한다.
+
+
+
+
+
+
+
+## 3. 핵심 요구사항 (Key Requirements)
+
+
+
+### 3.1. 기능적 요구사항 (Functional Specs)
+
+1. **이벤트 기반 선별 송출 (Throttling & Tracking):**
+
+   * 단순 탐지(Detection)를 넘어 **ByteTrack** 등의 경량 트래커를 연동하여 객체에 고유 ID를 부여한다.
+
+   * **송출 조건:** 모든 프레임을 쏘지 않고, ① 새로운 ID의 차량이 화면에 진입했을 때, ② 특정 가상 차선(ROI Line)을 통과했을 때, 혹은 ③ 1초 단위 상태 요약(Summary) 시점에만 JSON 데이터를 생성하여 송출한다.
+
+
+
+
+
+
+
+2. **타겟 클래스 및 신뢰도 제어:**
+
+   * 타겟(승용차, 화물차, 버스, 이륜차)만 필터링하며, Confidence **0.5 (50%) 이상**인 데이터만 유효 처리.
+
+
+
+### 3.2. 구조적 요구사항 (Structural Specs)
+
+1. **[필수] SharedMemory 동기화 (Lock 방어선):**
+
+   * 스트리밍 수집 워커와 Vision 추론 워커 간의 메모리 충돌(Tearing)을 막기 위해, 반드시 `multiprocessing.Lock` (또는 `asyncio.Lock`)을 획득한 상태(`with lock:`)에서만 프레임(Numpy Array)을 안전하게 복사(`copy`)하여 읽어온다.
+
+2. **싱글톤 모델 로드 & 논블로킹 추론:**
+
+   * 모델은 시스템 기동 시 단 한 번만 메모리에 적재하며, 추론 병목이 통신(API) 루프를 막지 않도록 비동기 스레드 풀에서 실행한다.
+
+
+
+## 4. 데이터 출력 규격 (Event-Driven Data Interface)
+
+프레임 단위가 아닌 **이벤트 타입(event_type)**과 **추적 ID(track_id)**가 포함된 형태로 백엔드 전송 규격을 변경한다.
+
+
+
+```json
+
+{
+
+  "event_id": "evt_20260312_1001_005",
+
+  "event_type": "object_entered", // object_entered, line_crossed, periodic_summary 등
+
+  "timestamp": "2026-03-12T10:15:30.123Z",
+
+  "camera_id": "CAM_INTERSECTION_MAIN",
+
+  "data": {
+
+    "track_id": "track_1042",
+
+    "class_name": "motorcycle",
+
+    "confidence": 0.88,
+
+    "bbox": {"x_center": 450, "y_center": 120, "width": 40, "height": 90}
+
+  }
+
+}
+
+5. 개발팀 Action Item (To-Do List)
+
+[ ] config.py에 타겟 클래스, Confidence, 그리고 추론 해상도(IMGSZ = 1280) 상수화.
+
+[ ] services/vision.py 내부 SharedMemory 읽기 로직에 Lock 메커니즘(with lock:) 추가.
+
+[ ] YOLO26n 추론 결과에 ByteTrack(또는 BoT-SORT) 알고리즘을 연결하여 객체별 고유 ID 부여 로직 구현.
+
+[ ] 매 프레임 전송 로직을 폐기하고, 이벤트(신규 등장 등) 발생 시에만 HTTP Client를 호출하도록 송출 제어 로직 작성.
+
