@@ -4,6 +4,7 @@ import com.aipass.dto.LoginRequest;
 import com.aipass.dto.LoginResponse;
 import com.aipass.dto.MemberDTO;
 import com.aipass.dto.SignupRequest;
+import com.aipass.service.EmailService;
 import com.aipass.service.MemberService;
 import jakarta.servlet.http.HttpSession;
 import org.springframework.http.ResponseEntity;
@@ -18,9 +19,11 @@ public class AuthController {
     private static final String EMAIL_REGEX = "^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$";
 
     private final MemberService memberService;
+    private final EmailService emailService;
 
-    public AuthController(MemberService memberService) {
+    public AuthController(MemberService memberService, EmailService emailService) {
         this.memberService = memberService;
+        this.emailService = emailService;
     }
 
     @PostMapping("/login")
@@ -171,6 +174,46 @@ public class AuthController {
                 request.getEmail()
         );
         return ResponseEntity.ok(Map.of("message", "회원가입이 완료되었습니다."));
+    }
+
+    @PostMapping("/send-code")
+    public ResponseEntity<?> sendCode(@RequestBody Map<String, String> request) {
+        String email = request.get("email");
+        if (!isValidEmail(email)) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("message", "올바른 이메일 형식을 입력하세요."));
+        }
+        try {
+            emailService.sendVerificationCode(email);
+            return ResponseEntity.ok(Map.of("message", "인증코드가 발송되었습니다."));
+        } catch (Exception e) {
+            return ResponseEntity.status(500)
+                    .body(Map.of("message", "이메일 발송에 실패했습니다."));
+        }
+    }
+
+    @PostMapping("/verify-code")
+    public ResponseEntity<?> verifyCode(@RequestBody Map<String, String> request) {
+        String email = request.get("email");
+        String code = request.get("code");
+        if (emailService.verifyCode(email, code)) {
+            return ResponseEntity.ok(Map.of("verified", true));
+        }
+        return ResponseEntity.badRequest()
+                .body(Map.of("message", "인증코드가 일치하지 않거나 만료되었습니다."));
+    }
+
+    @PostMapping("/find-id-full")
+    public ResponseEntity<?> findIdFull(@RequestBody Map<String, String> request) {
+        String name = request.get("name");
+        String email = request.get("email");
+
+        MemberDTO member = memberService.findByNameAndEmail(name, email);
+        if (member == null) {
+            return ResponseEntity.status(404)
+                    .body(Map.of("message", "일치하는 계정을 찾을 수 없습니다."));
+        }
+        return ResponseEntity.ok(Map.of("username", member.getLoginId()));
     }
 
     private boolean isValidEmail(String email) {

@@ -53,27 +53,60 @@
             <span class="result-value highlight">{{ foundUsername }}</span>
           </div>
         </div>
-        <button class="btn-submit" @click="step = 'resetPw'">Find PW</button>
+
+        <!-- 전체 아이디 보기 (이메일 인증) -->
+        <template v-if="!idFullRevealed">
+          <template v-if="!idCodeSent">
+            <button class="btn-submit" @click="sendIdFullCode">
+              전체 아이디 보기 (이메일 인증)
+            </button>
+          </template>
+          <template v-else>
+            <div class="find-form" style="margin-bottom: 8px;">
+              <div class="form-group">
+                <div style="display: flex; gap: 6px;">
+                  <input v-model="idVerifyCode" type="text" placeholder="인증코드 6자리"
+                         maxlength="6" style="flex:1;" />
+                  <button type="button" class="btn-submit" style="width: auto; padding: 10px 16px;"
+                          @click="verifyIdFullCode" :disabled="idVerifyCode.length !== 6">
+                    확인
+                  </button>
+                </div>
+                <p v-if="idCodeError" class="field-error">★ {{ idCodeError }}</p>
+              </div>
+            </div>
+          </template>
+        </template>
+
+        <button class="btn-submit" @click="step = 'resetPw'" style="margin-top: 6px;">Find PW</button>
         <div class="find-footer">
           <router-link to="/login" class="btn-back">Back to Login</router-link>
         </div>
       </template>
 
-      <!-- Step 3a: Reset PW 본인 확인 -->
+      <!-- Step 3a: Reset PW 본인 확인 + 이메일 인증 -->
       <template v-if="step === 'resetPw'">
         <h2 class="find-title">Reset PW</h2>
         <form @submit.prevent="handleVerifyForReset" class="find-form" novalidate>
           <div class="form-group">
-            <input v-model="pwForm.username" type="text" placeholder="ID" @input="pwErrors.username = ''" />
+            <input v-model="pwForm.username" type="text" placeholder="ID"
+                   @input="pwErrors.username = ''" :disabled="pwCodeSent" />
             <p v-if="pwErrors.username" class="field-error">★ {{ pwErrors.username }}</p>
           </div>
           <div class="form-group">
-            <input v-model="pwForm.email" type="email" placeholder="E-mail" @input="pwErrors.email = ''" />
+            <input v-model="pwForm.email" type="email" placeholder="E-mail"
+                   @input="pwErrors.email = ''" :disabled="pwCodeSent" />
             <p v-if="pwErrors.email" class="field-error">★ {{ pwErrors.email }}</p>
           </div>
+          <template v-if="pwCodeSent">
+            <div class="form-group">
+              <input v-model="pwVerifyCode" type="text" placeholder="인증코드 6자리" maxlength="6" />
+              <p v-if="pwCodeError" class="field-error">★ {{ pwCodeError }}</p>
+            </div>
+          </template>
           <p v-if="pwError" class="global-error">{{ pwError }}</p>
           <button type="submit" class="btn-submit" :disabled="pwLoading">
-            {{ pwLoading ? 'Loading...' : 'Reset Password' }}
+            {{ pwLoading ? 'Loading...' : (pwCodeSent ? '인증 확인' : '인증코드 발송') }}
           </button>
         </form>
         <div class="find-footer">
@@ -159,15 +192,48 @@ const handleFindId = async () => {
   }
 }
 
-// ── Reset PW (본인 확인) ──
+// ── Find ID 전체 보기 (이메일 인증) ──
+const idCodeSent = ref(false)
+const idVerifyCode = ref('')
+const idCodeError = ref('')
+const idFullRevealed = ref(false)
+
+const sendIdFullCode = async () => {
+  try {
+    await api.post('/auth/send-code', { email: foundEmail.value })
+    idCodeSent.value = true
+  } catch {
+    idCodeError.value = '인증코드 발송에 실패했습니다.'
+  }
+}
+
+const verifyIdFullCode = async () => {
+  idCodeError.value = ''
+  try {
+    const res = await api.post('/auth/verify-code', { email: foundEmail.value, code: idVerifyCode.value })
+    if (res.data.verified) {
+      const fullRes = await api.post('/auth/find-id-full', { name: foundName.value, email: foundEmail.value })
+      foundUsername.value = fullRes.data.username
+      idFullRevealed.value = true
+    }
+  } catch {
+    idCodeError.value = '인증코드가 일치하지 않거나 만료되었습니다.'
+  }
+}
+
+// ── Reset PW (본인 확인 + 이메일 인증) ──
 const pwForm = reactive({ username: '', email: '' })
 const pwErrors = reactive({ username: '', email: '' })
 const pwError = ref('')
 const pwLoading = ref(false)
+const pwCodeSent = ref(false)
+const pwVerifyCode = ref('')
+const pwCodeError = ref('')
 
 const handleVerifyForReset = async () => {
   let valid = true
   pwError.value = ''
+  pwCodeError.value = ''
 
   if (!pwForm.username.trim()) { pwErrors.username = '아이디를 입력하세요.'; valid = false }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(pwForm.email.trim())) {
@@ -178,10 +244,22 @@ const handleVerifyForReset = async () => {
 
   pwLoading.value = true
   try {
-    await api.post('/auth/verify-reset', { username: pwForm.username, email: pwForm.email })
-    step.value = 'newPassword'
+    if (!pwCodeSent.value) {
+      await api.post('/auth/verify-reset', { username: pwForm.username, email: pwForm.email })
+      await api.post('/auth/send-code', { email: pwForm.email })
+      pwCodeSent.value = true
+    } else {
+      const res = await api.post('/auth/verify-code', { email: pwForm.email, code: pwVerifyCode.value })
+      if (res.data.verified) {
+        step.value = 'newPassword'
+      }
+    }
   } catch (err) {
-    pwError.value = err.response?.data?.message || '일치하는 계정을 찾을 수 없습니다.'
+    if (!pwCodeSent.value) {
+      pwError.value = err.response?.data?.message || '일치하는 계정을 찾을 수 없습니다.'
+    } else {
+      pwCodeError.value = '인증코드가 일치하지 않거나 만료되었습니다.'
+    }
     triggerShake()
   } finally {
     pwLoading.value = false
