@@ -54,6 +54,10 @@ public class MemberService {
         memberMapper.updateMember(member);
     }
 
+    public void updateEmail(String loginId, String email) {
+        memberMapper.updateEmail(loginId, email);
+    }
+
     public void changePassword(String loginId, String newPassword) {
         memberMapper.updatePassword(loginId, passwordEncoder.encode(newPassword));
     }

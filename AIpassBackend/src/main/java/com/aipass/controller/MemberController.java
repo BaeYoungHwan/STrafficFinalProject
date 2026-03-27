@@ -43,17 +43,13 @@ public class MemberController {
                     .body(Map.of("message", "로그인이 필요합니다."));
         }
 
-        String name = request.get("name");
         String email = request.get("email");
 
-        if (name == null || name.isBlank()) {
-            return ResponseEntity.badRequest().body(Map.of("message", "이름을 입력하세요."));
-        }
         if (email == null || !email.contains("@")) {
             return ResponseEntity.badRequest().body(Map.of("message", "올바른 이메일을 입력하세요."));
         }
 
-        memberService.updateProfile(member.getLoginId(), name, email);
+        memberService.updateEmail(member.getLoginId(), email);
 
         MemberDTO updated = memberService.findByLoginId(member.getLoginId());
         session.setAttribute("loginMember", updated);
