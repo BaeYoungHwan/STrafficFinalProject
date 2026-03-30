@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.aipass.dao.TrafficMapper">
+
+    <!-- 교차로 전체 목록 + 최신 혼잡도 LEFT JOIN -->
+    <select id="findAll" resultType="com.aipass.dto.TrafficIntersectionDTO">
+        SELECT
+            i.intersection_id,
+            i.name,
+            CAST(i.latitude  AS DOUBLE PRECISION) AS latitude,
+            CAST(i.longitude AS DOUBLE PRECISION) AS longitude,
+            COALESCE(i.status, 'NORMAL')           AS status,
+            COALESCE(i.green_time,  40)            AS green_time,
+            COALESCE(i.yellow_time,  5)            AS yellow_time,
+            COALESCE(i.red_time,    35)            AS red_time,
+            COALESCE(tc.congestion_level, 'SMOOTH') AS congestion_level
+        FROM intersection i
+        LEFT JOIN LATERAL (
+            SELECT congestion_level
+            FROM traffic_congestion
+            WHERE intersection_id = i.intersection_id
+            ORDER BY recorded_at DESC
+            LIMIT 1
+        ) tc ON true
+        ORDER BY i.intersection_id
+    </select>
+
+    <!-- 교차로 단건 조회 + 최신 혼잡도 -->
+    <select id="findById" resultType="com.aipass.dto.TrafficIntersectionDTO">
+        SELECT
+            i.intersection_id,
+            i.name,
+            CAST(i.latitude  AS DOUBLE PRECISION) AS latitude,
+            CAST(i.longitude AS DOUBLE PRECISION) AS longitude,
+            COALESCE(i.status, 'NORMAL')           AS status,
+            COALESCE(i.green_time,  40)            AS green_time,
+            COALESCE(i.yellow_time,  5)            AS yellow_time,
+            COALESCE(i.red_time,    35)            AS red_time,
+            COALESCE(tc.congestion_level, 'SMOOTH') AS congestion_level
+        FROM intersection i
+        LEFT JOIN LATERAL (
+            SELECT congestion_level
+            FROM traffic_congestion
+            WHERE intersection_id = i.intersection_id
+            ORDER BY recorded_at DESC
+            LIMIT 1
+        ) tc ON true
+        WHERE i.intersection_id = #{id}
+    </select>
+
+    <!-- 신호 시간 업데이트 -->
+    <update id="updateSignal">
+        UPDATE intersection
+        SET green_time  = #{green},
+            yellow_time = #{yellow},
+            red_time    = #{red}
+        WHERE intersection_id = #{id}
+    </update>
+
+    <!--
+        시간대별 교통 흐름 집계 (traffic_flow_log 전체 기준)
+        NOTE: traffic_flow_log 에는 intersection_id 컬럼이 없으므로
+              전체 링크 데이터를 시간대별로 집계합니다.
+              데이터가 없는 경우 빈 배열을 반환합니다.
+    -->
+    <select id="findFlowByHour" resultType="com.aipass.dto.TrafficFlowHourDTO">
+        SELECT
+            TO_CHAR(DATE_TRUNC('hour', collected_at), 'HH24:MI') AS hour,
+            COUNT(*)                                              AS vehicle_count,
+            ROUND(AVG(speed)::numeric, 1)                        AS avg_speed,
+            CASE
+                WHEN AVG(speed) >= 40 THEN 'SMOOTH'
+                WHEN AVG(speed) >= 25 THEN 'SLOW'
+                ELSE 'CONGESTED'
+            END AS congestion_level
+        FROM traffic_flow_log
+        WHERE collected_at >= NOW() - INTERVAL '24 hours'
+        GROUP BY DATE_TRUNC('hour', collected_at)
+        ORDER BY DATE_TRUNC('hour', collected_at)
+        LIMIT #{limit}
+    </select>
+
+    <!-- 교차로 상태 요약 집계 -->
+    <select id="findSummary" resultType="map">
+        SELECT
+            COUNT(*)                                                          AS total_intersections,
+            COUNT(*) FILTER (WHERE COALESCE(i.status, 'NORMAL') = 'NORMAL')     AS normal_count,
+            COUNT(*) FILTER (WHERE COALESCE(i.status, 'NORMAL') = 'CAUTION')    AS caution_count,
+            COUNT(*) FILTER (WHERE COALESCE(i.status, 'NORMAL') = 'EMERGENCY')  AS emergency_count,
+            COUNT(*) FILTER (WHERE tc.congestion_level = 'CONGESTED')           AS congested_count,
+            ROUND(AVG(
+                COALESCE(i.green_time, 40) +
+                COALESCE(i.yellow_time, 5) +
+                COALESCE(i.red_time, 35)
+            ))                                                                AS avg_cycle_time
+        FROM intersection i
+        LEFT JOIN LATERAL (
+            SELECT congestion_level
+            FROM traffic_congestion
+            WHERE intersection_id = i.intersection_id
+            ORDER BY recorded_at DESC
+            LIMIT 1
+        ) tc ON true
+    </select>
+
+</mapper>
