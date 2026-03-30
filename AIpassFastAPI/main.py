@@ -24,6 +24,29 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+async def _retry_cctv_url():
+    """Spring Boot가 뜰 때까지 30초 간격으로 ai-target 재시도 (최대 10회 = 5분)"""
+    for _ in range(10):
+        await asyncio.sleep(30)
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as c:
+                resp = await c.get(f"{settings.BACKEND_URL}/api/cctv/ai-target")
+                data = resp.json()
+                if data.get("success") and data.get("data", {}).get("url"):
+                    new_url = data["data"]["url"]
+                    new_id  = data["data"].get("cctvId", settings.CAMERA_ID)
+                    if new_url != vision_engine.rtsp_url:
+                        logger.info("[AI-Target] URL 갱신 — 엔진 재시작: %s", new_url)
+                        vision_engine.camera_id = new_id
+                        vision_engine.restart(new_url)
+                    else:
+                        logger.info("[AI-Target] URL 동일 — 재시작 불필요: %s", new_url)
+                    return
+        except Exception as e:
+            logger.debug("[AI-Target] 재시도 실패: %s", e)
+    logger.warning("[AI-Target] 재시도 5분 초과 — 포기")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ── START-UP ──────────────────────────────────────────────
@@ -48,8 +71,10 @@ async def lifespan(app: FastAPI):
                     logger.info("[AI-Target] CCTV URL: %s", vision_engine.rtsp_url)
                 else:
                     logger.warning("[AI-Target] 응답 파싱 실패 — fallback URL 사용")
+                    asyncio.create_task(_retry_cctv_url())
         except Exception as e:
             logger.warning("[AI-Target] Spring Boot 미연결 — fallback URL 사용: %s", e)
+            asyncio.create_task(_retry_cctv_url())
 
         if vision_engine.rtsp_url:
             vision_engine.start()

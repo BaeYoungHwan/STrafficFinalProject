@@ -141,10 +141,10 @@ def _find_plate_by_contour(frame: np.ndarray):
 
     # ① 흰색 번호판 (일반 승용차)
     white_mask = cv2.inRange(gray, 150, 255)
-    # ② 주황/핑크 번호판 (트럭·구형 번호판)
-    orange_mask = cv2.inRange(hsv, np.array([5, 60, 80]), np.array([28, 255, 255]))
+    # ② 주황/핑크 번호판 (트럭·구형 번호판) — 채도 하한 완화(60→50): 조명 변화 대응
+    orange_mask = cv2.inRange(hsv, np.array([5, 50, 60]), np.array([32, 255, 255]))
     # ③ 초록 번호판 (전기차)
-    green_mask = cv2.inRange(hsv, np.array([35, 50, 50]), np.array([90, 255, 255]))
+    green_mask = cv2.inRange(hsv, np.array([35, 40, 40]), np.array([90, 255, 255]))
 
     combined = cv2.bitwise_or(white_mask, cv2.bitwise_or(orange_mask, green_mask))
     kernel = np.ones((3, 3), np.uint8)
@@ -369,12 +369,13 @@ async def run_ocr_on_file(src_path: str) -> dict:
     if frame is None:
         uid = uuid.uuid4().hex[:8]
         logger.warning(f"[OCR] 이미지 읽기 실패: {src_path}")
-        return {"plate_number": f"UNRECOGNIZED_{uid}", "image_url": None, "needs_review": False}
+        return {"plate_number": f"UNRECOGNIZED_{uid}", "image_url": None, "needs_review": True}
 
     # 밝기 보정된 프레임 및 범퍼 크롭 — executor로 이동하여 이벤트 루프 차단 방지
+    # bumper_y=0.35: 화물차 번호판이 이미지 중앙(~45%)에 위치하는 경우 대응
     def _preprocess_frames():
         bright = _brighten_frame(frame)
-        bumper_y = int(frame.shape[0] * 0.50)
+        bumper_y = int(frame.shape[0] * 0.35)
         bumper = frame[bumper_y:, :]
         bright_bmp = _brighten_frame(bumper)
         return bright, bumper_y, bumper, bright_bmp
@@ -506,15 +507,16 @@ async def run_ocr_on_file(src_path: str) -> dict:
         # ── Stage 3: HSV 색상 컨투어 기반 탐지 ──
         contour_crop = _find_plate_by_contour(bumper_frame)
         if contour_crop is not None:
+            # 3a: 크롭 원본 OCR
             bbox3, text3, conf3, fb_texts3, avg_conf3 = _ocr_on_image(contour_crop)
-            if text3 is not None:
+            if text3 is not None and PLATE_PATTERN.match(text3):
                 logger.info(f"[OCR Stage3] 컨투어 감지: {text3} (conf={conf3:.3f})")
                 return contour_crop, text3, conf3 < CONFIDENCE_THRESHOLD
-            # combined fallback 텍스트가 번호판 패턴에 맞으면 성공 처리
             combined3 = "".join(fb_texts3) if fb_texts3 else ""
             if PLATE_PATTERN.match(combined3):
                 logger.info(f"[OCR Stage3] 컨투어 복합 감지: {combined3} (avg_conf={avg_conf3:.3f})")
                 return contour_crop, combined3, avg_conf3 < CONFIDENCE_THRESHOLD
+
             if combined3:
                 logger.info("[OCR Stage3] 컨투어 크롭 저장 (텍스트 미인식)")
                 return contour_crop, f"MANUAL_REVIEW_REQUIRED:{combined3}", True
@@ -563,7 +565,7 @@ async def run_ocr_on_file(src_path: str) -> dict:
         if _fb_stage_minus1_text:
             logger.warning(f"[OCR] Stage-1 부분 결과 활용: {_fb_stage_minus1_text} (conf={_fb_stage_minus1_conf:.3f})")
             return _fb_stage_minus1_crop, f"MANUAL_REVIEW_REQUIRED:{_fb_stage_minus1_text}", True
-        return None, "UNRECOGNIZED", False
+        return None, "UNRECOGNIZED", True
 
     # OCR 전용 executor + 세마포어로 동시 실행 수 제한 (MJPEG 스트림 스레드 보호)
     async with ocr_semaphore:
@@ -582,7 +584,7 @@ async def run_ocr_on_file(src_path: str) -> dict:
             and not plate_text.startswith("UNRECOGNIZED"):
         logger.warning(f"[OCR] 한글 없는 결과 차단: {plate_text} → UNRECOGNIZED 처리")
         plate_text = f"UNRECOGNIZED_{uuid.uuid4().hex[:8]}"
-        needs_review = False
+        needs_review = True
 
     if plate_crop is not None and _validate_crop(plate_crop):
         save_frame = plate_crop
