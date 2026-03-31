@@ -6,3 +6,6 @@ __pycache__/
 *.mp4
 captured_images/
 data/carnumber
+data/numberplate
+data/plate_dataset/
+runs/
