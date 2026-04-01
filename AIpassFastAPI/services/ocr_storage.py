@@ -57,6 +57,24 @@ _OCR_CORRECTION_MAP: dict[str, list[str]] = {
     "S": ["서", "소", "수"],
     "R": ["라", "러"],
     "L": ["라", "루"],
+    # 소문자 (PaddleOCR korean 모델이 소문자를 반환하는 케이스)
+    "a": ["아", "사"],
+    "b": ["바", "버"],
+    "d": ["다", "더"],
+    "e": ["어", "서"],
+    "g": ["거", "구"],
+    "h": ["하", "허"],
+    "k": ["카"],
+    "l": ["라", "루"],
+    "m": ["마", "머"],
+    "n": ["나", "너"],
+    "o": ["오", "호"],
+    "p": ["파", "포"],
+    "q": ["아", "구"],
+    "r": ["라", "러"],
+    "s": ["서", "소", "수"],
+    "t": ["타"],
+    "u": ["우", "루"],
 }
 
 # 숫자 위치 영문자 → 숫자 교정 테이블
@@ -70,6 +88,9 @@ _LETTER_TO_DIGIT: dict[str, str] = {
     "B": "8",   # B 쌍구멍 → 8
     "G": "6",   # G 굴곡 → 6
     "g": "9",   # 소문자 g → 9
+    "o": "0",   # 소문자 o → 0
+    "s": "5",   # 소문자 s → 5 (숫자 위치일 때)
+    "b": "8",   # 소문자 b → 8 (숫자 위치일 때)
 }
 
 
@@ -117,6 +138,122 @@ def _correct_ocr_text(text: str) -> list[str]:
     return candidates
 
 
+# 유사 한글 혼동 교정 테이블 (획 모양이 비슷해서 OCR이 오인식하는 케이스)
+_CONFUSABLE_HANGUL: dict[str, list[str]] = {
+    "어": ["허", "서", "저"],
+    "허": ["어", "서"],
+    "오": ["호", "소"],
+    "호": ["오", "소"],
+    "아": ["하", "사"],
+    "하": ["아"],
+    "우": ["후", "수", "부"],
+    "후": ["우"],
+    "너": ["나", "머"],
+    "나": ["너"],
+    "머": ["마", "너"],
+    "마": ["머"],
+    "더": ["다", "버"],
+    "다": ["더"],
+    "버": ["바", "더"],
+    "바": ["버"],
+    "서": ["사", "어"],
+    "사": ["서"],
+    "저": ["자", "어"],
+    "자": ["저"],
+    "거": ["가"],
+    "가": ["거"],
+    "도": ["로", "고", "소"],
+    "로": ["도", "고"],
+    "고": ["도", "로", "호"],
+    "노": ["도", "모"],
+    "모": ["노", "도"],
+    "보": ["소"],
+    "조": ["소", "도"],
+    "소": ["조", "도"],
+    "구": ["수", "주"],
+    "수": ["구"],
+    "주": ["수", "구"],
+    "누": ["두", "수"],
+    "두": ["누"],
+    "무": ["수", "누"],
+    "루": ["수"],
+    "부": ["수", "우"],
+}
+
+
+def _positional_hangul_recovery(raw_text: str) -> str | None:
+    """번호판 구조 지식으로 한글 미인식/오인식 텍스트를 교정.
+
+    한국 번호판 구조: [2-3자리 숫자][한글 1자리][4자리 숫자]
+    한글이 있어야 할 위치의 문자를 집중적으로 교정.
+
+    Args:
+        raw_text: OCR 원본 텍스트 (영문 소문자 포함 가능)
+
+    Returns:
+        교정된 번호판 문자열 또는 None (교정 불가)
+    """
+    if not raw_text:
+        return None
+
+    # 유효 문자만 추출 (한글/숫자/영문)
+    chars = re.sub(r'[^0-9a-zA-Z가-힣]', '', raw_text)
+    if not chars:
+        return None
+
+    # 이미 PLATE_PATTERN 매칭이면 그대로 반환
+    cleaned = re.sub(r'[^0-9가-힣]', '', _correct_digit_positions(chars))
+    if PLATE_PATTERN.match(cleaned):
+        return cleaned
+
+    # 선두 숫자 개수 파악 → 한글 위치 추정
+    m = re.match(r'^\d*', chars)
+    leading = len(m.group()) if m else 0
+
+    # 2자리와 3자리 모두 시도
+    positions_to_try = []
+    if leading in (2, 3):
+        positions_to_try = [leading]
+    elif leading == 4:
+        # 4자리 숫자로 인식된 경우 → 2자리+한글+숫자 또는 3자리+한글+숫자 패턴 탐색
+        positions_to_try = [2, 3]
+    else:
+        positions_to_try = [2, 3]
+
+    for hangul_pos in positions_to_try:
+        if hangul_pos >= len(chars):
+            continue
+
+        target_char = chars[hangul_pos]
+        after_chars = chars[hangul_pos + 1:]
+        # 뒤 숫자 부분 교정 (영문 → 숫자)
+        after_corrected = _correct_digit_positions(after_chars)
+        after_digits = re.sub(r'[^0-9]', '', after_corrected)
+
+        prefix = re.sub(r'[^0-9]', '', chars[:hangul_pos])
+
+        # Case 1: 이미 유효 한글인 경우
+        if re.match(r'[가-힣]', target_char):
+            candidate = prefix + target_char + after_digits
+            if PLATE_PATTERN.match(candidate):
+                return candidate
+            # 유사 한글로 교차 교정 시도
+            if target_char in _CONFUSABLE_HANGUL:
+                for alt in _CONFUSABLE_HANGUL[target_char]:
+                    alt_candidate = prefix + alt + after_digits
+                    if PLATE_PATTERN.match(alt_candidate):
+                        return alt_candidate
+
+        # Case 2: ASCII → 한글 교정
+        elif target_char in _OCR_CORRECTION_MAP:
+            for hangul_candidate in _OCR_CORRECTION_MAP[target_char]:
+                candidate = prefix + hangul_candidate + after_digits
+                if PLATE_PATTERN.match(candidate):
+                    return candidate
+
+    return None
+
+
 NUMBERPLATE_DIR = "data/numberplate"
 os.makedirs(NUMBERPLATE_DIR, exist_ok=True)
 
@@ -131,6 +268,9 @@ ocr_model = PaddleOCR(
     use_doc_orientation_classify=False,
     use_doc_unwarping=False,
     cpu_threads=2,          # OCR 전용 코어 2개로 제한 → YOLO/MJPEG 코어 경쟁 방지
+    det_db_thresh=0.2,      # 기본 0.3 → 희미한 문자도 감지
+    det_db_box_thresh=0.4,  # 기본 0.5 → 작은 문자 bbox 생존
+    rec_batch_num=6,        # 번호판 최대 6문자 일괄 처리
 )
 
 
@@ -223,7 +363,7 @@ def _preprocess_for_ocr(
                 cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                 cv2.THRESH_BINARY, block, 8
             )
-        kernel = np.ones((1, 1), np.uint8)  # 커널 축소 → 한글 획 보존
+        kernel = np.ones((2, 1), np.uint8)  # 세로 2px 팽창 → 한글 획 연결 보강
         enhanced = cv2.dilate(enhanced, kernel, iterations=1)
 
     return cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
@@ -506,6 +646,107 @@ async def extract_license_plate(frame: np.ndarray) -> str:
             return "UNRECOGNIZED"
 
 
+def _detect_plate_by_ocr_clustering(frame: np.ndarray) -> tuple[np.ndarray | None, str, bool]:
+    """OCR bbox들의 공간적 클러스터링으로 번호판 위치 역추적.
+
+    YOLO가 실패한 전체 이미지에서 텍스트 bbox들을 행 단위로 클러스터링하여
+    [숫자][한글/ASCII][숫자] 패턴과 매칭되는 행을 번호판 영역으로 사용.
+    """
+    h, w = frame.shape[:2]
+    # 하단 65%만 탐색 (상단은 표지판 등 노이즈)
+    y_offset = int(h * 0.35)
+    search_area = frame[y_offset:, :]
+
+    try:
+        raw = ocr_model.ocr(search_area)
+    except Exception as e:
+        logger.debug(f"[OCR Cluster] OCR 실패: {e}")
+        return None, "", True
+
+    result = _normalize_ocr_result(raw)
+    if not result:
+        return None, "", True
+
+    # bbox + text + conf 수집
+    detections = []
+    for line in result:
+        if not (line and len(line) >= 2 and isinstance(line[1], (list, tuple))):
+            continue
+        bbox = line[0]
+        text = str(line[1][0]) if line[1] else ""
+        conf = float(line[1][1]) if len(line[1]) >= 2 else 0.0
+        if not text:
+            continue
+        try:
+            xs = [float(p[0]) for p in bbox]
+            ys = [float(p[1]) for p in bbox]
+        except (TypeError, IndexError):
+            continue
+        cx = (min(xs) + max(xs)) / 2
+        cy = (min(ys) + max(ys)) / 2
+        bh = max(ys) - min(ys)
+        detections.append({
+            "text": text, "conf": conf,
+            "cx": cx, "cy": cy, "bh": bh,
+            "x1": min(xs), "x2": max(xs),
+            "y1": min(ys), "y2": max(ys),
+        })
+
+    if not detections:
+        return None, "", True
+
+    # y좌표 클러스터링: 같은 행의 텍스트 그룹화
+    detections.sort(key=lambda d: d["cy"])
+    rows = []
+    current_row = [detections[0]]
+    for d in detections[1:]:
+        ref_bh = max(dd["bh"] for dd in current_row) or 10
+        if abs(d["cy"] - current_row[-1]["cy"]) < ref_bh * 1.5:
+            current_row.append(d)
+        else:
+            rows.append(current_row)
+            current_row = [d]
+    rows.append(current_row)
+
+    # 각 행에서 번호판 패턴 탐색
+    for row in rows:
+        row.sort(key=lambda d: d["cx"])
+        combined_text = "".join(d["text"] for d in row)
+
+        # 교정 후 패턴 매칭
+        corrected = _correct_digit_positions(combined_text)
+        cleaned = re.sub(r'[^0-9가-힣]', '', corrected)
+        plate_candidate = None
+
+        if PLATE_PATTERN.match(cleaned):
+            plate_candidate = cleaned
+        # 주의: _positional_hangul_recovery를 여기서 호출하면 조기 반환으로
+        # Stage 6 (고배율 정밀 인식)을 건너뛰어 오히려 정확도가 낮아질 수 있음.
+        # 한글이 이미 포함된 경우만 Stage -1.5에서 반환하고,
+        # 숫자만 있는 경우는 후속 스테이지에 위임한다.
+
+        if plate_candidate:
+            # 합산 bbox 계산 (padding 포함)
+            pad = 15
+            rx1 = max(0, int(min(d["x1"] for d in row)) - pad)
+            ry1 = max(0, int(min(d["y1"] for d in row)) - pad)
+            rx2 = min(search_area.shape[1], int(max(d["x2"] for d in row)) + pad)
+            ry2 = min(search_area.shape[0], int(max(d["y2"] for d in row)) + pad)
+            # 원본 frame 기준으로 y좌표 변환
+            abs_y1 = y_offset + ry1
+            abs_y2 = y_offset + ry2
+            crop = frame[abs_y1:abs_y2, rx1:rx2]
+            if not _validate_crop(crop):
+                continue
+            avg_conf = sum(d["conf"] for d in row) / len(row) if row else 0.0
+            needs_review = avg_conf < CONFIDENCE_THRESHOLD or plate_candidate != cleaned
+            logger.info(f"[OCR Cluster] 번호판 역추적 성공: '{combined_text}' → '{plate_candidate}' (conf={avg_conf:.3f})")
+            return crop, plate_candidate, needs_review
+
+    logger.debug(f"[OCR Cluster] 패턴 매칭 실패 (행 수: {len(rows)})")
+    return None, "", True
+
+
 async def run_ocr_on_file(src_path: str) -> dict:
     """
     data/carnumber/ 이미지에서 PaddleOCR 감지 박스로 번호판 위치를 찾아
@@ -623,6 +864,13 @@ async def run_ocr_on_file(src_path: str) -> dict:
                         return yolo_crop, _corr_s2[0], True
 
                 logger.debug("[OCR Stage-2] YOLO 크롭 OCR 패턴 불일치: %s — 기존 파이프라인 계속", _combined_y)
+
+        # ── Stage -1.5: OCR bbox 클러스터링으로 번호판 위치 역추적 (YOLO 실패 시 보완) ──
+        logger.debug("[OCR Stage-1.5] OCR bbox 클러스터링 번호판 검출 시도")
+        _cluster_crop, _cluster_text, _cluster_review = _detect_plate_by_ocr_clustering(bumper_frame)
+        if _cluster_crop is not None and _cluster_text:
+            logger.info(f"[OCR Stage-1.5] 클러스터링 성공: {_cluster_text}")
+            return _cluster_crop, _cluster_text, _cluster_review
 
         # ── Stage -1: 전체 이미지 OCR (상단 25% 제외) ──
         # bumper 크롭 이전에 전체 frame 탐색 (번호판이 이미지 상단이거나 클로즈업 샷인 경우 대응)
@@ -1053,12 +1301,18 @@ async def run_ocr_on_file(src_path: str) -> dict:
     else:
         plate_text = plate_text_raw
 
-    # 한글 없는 결과(숫자만) 저장 차단 → UNRECOGNIZED 처리
+    # 한글 없는 결과(숫자만) 저장 차단 → 먼저 위치 기반 복구 시도
     if plate_text and not re.search(r'[가-힣]', plate_text) \
             and not plate_text.startswith("UNRECOGNIZED"):
-        logger.warning(f"[OCR] 한글 없는 결과 차단: {plate_text} → UNRECOGNIZED 처리")
-        plate_text = f"UNRECOGNIZED_{uuid.uuid4().hex[:8]}"
-        needs_review = True
+        recovered = _positional_hangul_recovery(plate_text)
+        if recovered:
+            logger.info(f"[OCR] 한글 위치 복구 성공: {plate_text} → {recovered}")
+            plate_text = recovered
+            needs_review = True  # 복구된 결과는 운영자 검토 필요
+        else:
+            logger.warning(f"[OCR] 한글 없는 결과 차단: {plate_text} → UNRECOGNIZED 처리")
+            plate_text = f"UNRECOGNIZED_{uuid.uuid4().hex[:8]}"
+            needs_review = True
 
     if plate_crop is not None and _validate_crop(plate_crop):
         save_frame = plate_crop
