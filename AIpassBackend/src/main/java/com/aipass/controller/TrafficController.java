@@ -14,7 +14,7 @@ import java.util.Map;
 /**
  * 교통 흐름 API
  *
- * <p>intersection 테이블 및 traffic_flow_log / traffic_congestion 테이블과 연동합니다.
+ * <p>intersection 테이블 및 traffic_flow_log 테이블과 연동합니다.
  * DB 초기화가 필요한 경우 sqls/migration_traffic.sql 을 먼저 실행하세요.</p>
  */
 @RestController
@@ -56,7 +56,6 @@ public class TrafficController {
         result.put("normalCount",        summary.getOrDefault("normal_count",        0));
         result.put("cautionCount",       summary.getOrDefault("caution_count",       0));
         result.put("emergencyCount",     summary.getOrDefault("emergency_count",     0));
-        result.put("congestedCount",     summary.getOrDefault("congested_count",     0));
         result.put("avgCycleTime",       summary.getOrDefault("avg_cycle_time",      80));
         return ResponseEntity.ok(result);
     }

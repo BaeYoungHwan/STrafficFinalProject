@@ -12,7 +12,6 @@ from multiprocessing import Process, Queue, shared_memory, Lock, Event
 from ultralytics import YOLO
 from core.config import settings
 from services.webhook_client import webhook_client
-from services.ocr_storage import run_ocr_on_file
 from utils.http_client import http_client
 
 logger = logging.getLogger(__name__)
@@ -23,6 +22,7 @@ _violation_queue: asyncio.Queue = asyncio.Queue(maxsize=10)
 # carnumber 이미지 목록 캐시 (Process B에서 1회 로드)
 _CARNUMBER_IMAGES: list = []
 
+
 def _get_carnumber_images() -> list:
     global _CARNUMBER_IMAGES
     if not _CARNUMBER_IMAGES:
@@ -32,6 +32,28 @@ def _get_carnumber_images() -> list:
         )
         logger.info(f"[VisionEngine] carnumber 이미지 {len(_CARNUMBER_IMAGES)}개 로드됨.")
     return _CARNUMBER_IMAGES
+
+
+def _pick_carnumber_image() -> str | None:
+    """data/numberplate/에 아직 저장되지 않은 carnumber 이미지를 랜덤 선택.
+
+    이미 numberplate 폴더에 동일 번호판 파일이 존재하면 제외한다.
+    모두 사용된 경우 전체에서 선택한다.
+    """
+    images = _get_carnumber_images()
+    if not images:
+        return None
+
+    candidates = [
+        p for p in images
+        if not os.path.exists(
+            os.path.join("data/numberplate", os.path.splitext(os.path.basename(p))[0] + ".jpg")
+        )
+    ]
+    if not candidates:
+        candidates = images  # 전부 사용된 경우 전체에서 선택
+
+    return random.choice(candidates)
 
 
 def video_reader_worker(rtsp_url: str, meta_queue: Queue, lock: Lock, stop_event: Event):
@@ -139,12 +161,11 @@ def _inference_loop(model, meta_queue, event_queue, lock, stop_event,
             speeding_events = process_headless(results) if _is_new_result else []
 
             # 과속 감지된 차량에 대해 carnumber 랜덤 이미지 선정 후 이벤트 큐에 적재
-            carnumber_images = _get_carnumber_images()
             for evt in speeding_events:
-                if not carnumber_images:
+                src_path = _pick_carnumber_image()
+                if not src_path:
                     logger.warning("[InferThread] carnumber 이미지 없음. 과속 이벤트 스킵.")
                     continue
-                src_path = random.choice(carnumber_images)
                 evt["payload"]["src_image_path"] = src_path
                 safe_put({"type": "SPEEDING_VIOLATION", "payload": evt["payload"]})
 
@@ -306,6 +327,7 @@ async def _handle_speeding_violation(payload: dict):
         payload["srcImageUrl"] = f"carnumber/{os.path.basename(src_path)}"
 
     if src_path and os.path.exists(src_path):
+        from services.ocr_storage import run_ocr_on_file  # lazy import: 메인 프로세스에서만 실행
         result = await run_ocr_on_file(src_path)
         plate = result["plate_number"]
         payload["plateNumber"] = plate
@@ -374,7 +396,7 @@ class VisionEngine:
                 continue
 
             try:
-                event = await asyncio.to_thread(self.event_queue.get, True, 0.1)
+                event = self.event_queue.get_nowait()
 
                 if event["type"] == "SPEEDING_VIOLATION":
                     # 위반 큐에 적재 → _violation_worker가 1개씩 순차 처리 (스트림 영향 없음)
@@ -384,7 +406,7 @@ class VisionEngine:
                         logger.warning("[EventLoop] 위반 큐 포화(10개) — 이벤트 드롭")
 
             except queue.Empty:
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0.05)  # 이벤트 없으면 50ms 대기 — 스레드풀 미사용
 
     def stop(self):
         self.stop_event.set()

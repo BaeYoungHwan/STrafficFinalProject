@@ -26,17 +26,16 @@ async def _mjpeg_generator() -> AsyncGenerator[bytes, None]:
     """VisionEngine의 mjpeg_queue에서 JPEG 프레임을 꺼내 multipart 스트림으로 전송."""
     while True:
         try:
-            frame_bytes: bytes = await asyncio.to_thread(
-                vision_engine.mjpeg_queue.get, True, 1.0
-            )
+            frame_bytes: bytes = vision_engine.mjpeg_queue.get_nowait()
             yield (
                 b"--frame\r\n"
                 b"Content-Type: image/jpeg\r\n\r\n"
                 + frame_bytes
                 + b"\r\n"
             )
+            await asyncio.sleep(0)  # 이벤트 루프 양보
         except queue.Empty:
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(1 / 30)  # 30fps 폴링 — 스레드풀 미사용
         except Exception as e:
             logger.warning("[Stream] Generator error: %s", e)
             await asyncio.sleep(0.1)

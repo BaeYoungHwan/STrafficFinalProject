@@ -4,7 +4,7 @@
 
 <mapper namespace="com.aipass.dao.TrafficMapper">
 
-    <!-- 교차로 전체 목록 + 최신 혼잡도 LEFT JOIN -->
+    <!-- 교차로 전체 목록 -->
     <select id="findAll" resultType="com.aipass.dto.TrafficIntersectionDTO">
         SELECT
             i.intersection_id,
@@ -14,20 +14,12 @@
             COALESCE(i.status, 'NORMAL')           AS status,
             COALESCE(i.green_time,  40)            AS green_time,
             COALESCE(i.yellow_time,  5)            AS yellow_time,
-            COALESCE(i.red_time,    35)            AS red_time,
-            COALESCE(tc.congestion_level, 'SMOOTH') AS congestion_level
+            COALESCE(i.red_time,    35)            AS red_time
         FROM intersection i
-        LEFT JOIN LATERAL (
-            SELECT congestion_level
-            FROM traffic_congestion
-            WHERE intersection_id = i.intersection_id
-            ORDER BY recorded_at DESC
-            LIMIT 1
-        ) tc ON true
         ORDER BY i.intersection_id
     </select>
 
-    <!-- 교차로 단건 조회 + 최신 혼잡도 -->
+    <!-- 교차로 단건 조회 -->
     <select id="findById" resultType="com.aipass.dto.TrafficIntersectionDTO">
         SELECT
             i.intersection_id,
@@ -37,16 +29,8 @@
             COALESCE(i.status, 'NORMAL')           AS status,
             COALESCE(i.green_time,  40)            AS green_time,
             COALESCE(i.yellow_time,  5)            AS yellow_time,
-            COALESCE(i.red_time,    35)            AS red_time,
-            COALESCE(tc.congestion_level, 'SMOOTH') AS congestion_level
+            COALESCE(i.red_time,    35)            AS red_time
         FROM intersection i
-        LEFT JOIN LATERAL (
-            SELECT congestion_level
-            FROM traffic_congestion
-            WHERE intersection_id = i.intersection_id
-            ORDER BY recorded_at DESC
-            LIMIT 1
-        ) tc ON true
         WHERE i.intersection_id = #{id}
     </select>
 
@@ -89,20 +73,12 @@
             COUNT(*) FILTER (WHERE COALESCE(i.status, 'NORMAL') = 'NORMAL')     AS normal_count,
             COUNT(*) FILTER (WHERE COALESCE(i.status, 'NORMAL') = 'CAUTION')    AS caution_count,
             COUNT(*) FILTER (WHERE COALESCE(i.status, 'NORMAL') = 'EMERGENCY')  AS emergency_count,
-            COUNT(*) FILTER (WHERE tc.congestion_level = 'CONGESTED')           AS congested_count,
             ROUND(AVG(
                 COALESCE(i.green_time, 40) +
                 COALESCE(i.yellow_time, 5) +
                 COALESCE(i.red_time, 35)
             ))                                                                AS avg_cycle_time
         FROM intersection i
-        LEFT JOIN LATERAL (
-            SELECT congestion_level
-            FROM traffic_congestion
-            WHERE intersection_id = i.intersection_id
-            ORDER BY recorded_at DESC
-            LIMIT 1
-        ) tc ON true
     </select>
 
 </mapper>
