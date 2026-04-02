@@ -33,6 +33,16 @@ class Settings(BaseSettings):
     # 지원 형식: 로컬 파일 (C:/path/video.mp4), RTSP (rtsp://...), HTTP (http://...)
     VIDEO_SOURCE_URL: str = ""
 
+    # ITS Open API — CCTV 스트림 URL 갱신용
+    CCTV_INFO_URL: str = ""  # .env의 CCTV_info_URL 값으로 덮어쓰기
+
+    # DB 직접 연결 (CCTV URL 갱신용)
+    DB_HOST: str = "localhost"
+    DB_PORT: int = 5432
+    DB_NAME: str = "aipass"
+    DB_USER: str = "postgres"
+    DB_PASSWORD: str = "1234"
+
     # [Flow C] Emergency Classes
     EMERGENCY_CLASSES: list = [9, 10]  # 구급차, 소방차 등 (커스텀 모델 기준)
 
