@@ -16,18 +16,6 @@
       </button>
     </div>
 
-    <!-- 지역구 필터 탭 -->
-    <div class="district-tabs" v-if="districts.length > 1">
-      <button
-        v-for="d in districts"
-        :key="d"
-        class="tab-btn"
-        :class="{ active: (d === '전체' && !activeDistrict) || d === activeDistrict }"
-        @click="activeDistrict = d === '전체' ? '' : d"
-      >
-        {{ d }}
-      </button>
-    </div>
 
     <!-- 로딩 스켈레톤 -->
     <div v-if="loading" class="cctv-grid">
@@ -104,7 +92,6 @@ import api from '../api'
 const cctvList = ref([])
 const loading = ref(false)
 const hoveredId = ref(null)
-const activeDistrict = ref('')
 
 const videoRefs = ref({})
 const hlsMap = {}
@@ -140,17 +127,7 @@ const observeCard = (el, cctvId) => {
 }
 
 // ─── 계산 속성 ────────────────────────────────────────────────────────────────
-const districts = computed(() => {
-  const set = new Set(cctvList.value.map(c => c.district).filter(Boolean))
-  return ['전체', ...Array.from(set)]
-})
-
-const filteredList = computed(() => {
-  if (!activeDistrict.value || activeDistrict.value === '전체') {
-    return cctvList.value.slice(0, 12)
-  }
-  return cctvList.value.filter(c => c.district === activeDistrict.value).slice(0, 12)
-})
+const filteredList = computed(() => cctvList.value.slice(0, 12))
 
 // ─── video ref 등록 ───────────────────────────────────────────────────────────
 const setVideoRef = (el, cctvId) => {
@@ -172,7 +149,6 @@ const initHlsForCard = (cctvId) => {
       if (data.fatal) {
         cardErrors.value[cctvId] = true
         destroyHlsForCard(cctvId)
-        setTimeout(() => fetchList(), 5000)
       }
     })
     hls.loadSource(cctv.streamUrl)
@@ -367,33 +343,6 @@ onBeforeUnmount(() => {
   transform: none;
 }
 
-/* 지역구 탭 */
-.district-tabs {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 20px;
-  flex-wrap: wrap;
-}
-
-.tab-btn {
-  padding: 6px 16px;
-  border-radius: 20px;
-  border: 1.5px solid #E2E8F0;
-  background: #fff;
-  color: #6B7280;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  font-family: inherit;
-}
-
-.tab-btn.active,
-.tab-btn:hover {
-  background: #1A6DCC;
-  color: #fff;
-  border-color: #1A6DCC;
-}
 
 /* 그리드 */
 .cctv-grid {
