@@ -48,12 +48,7 @@
           muted
           playsinline
         ></video>
-        <div v-if="cardErrors[cctv.cctvId]" class="stream-error">
-          <div class="stream-error-inner">
-            <span class="stream-error-icon">&#8635;</span>
-            <span>재연결 중...</span>
-          </div>
-        </div>
+
         <div class="cctv-overlay">
           <span class="cctv-name">{{ cctv.cctvName }}</span>
           <div class="cctv-meta">
@@ -76,7 +71,7 @@
             </div>
             <button class="modal-close" @click="closeModal">✕</button>
           </div>
-          <div ref="modalVideoContainer" class="modal-video"></div>
+          <video ref="modalVideo" class="modal-video" autoplay muted playsinline></video>
         </div>
       </div>
     </Teleport>
@@ -95,11 +90,10 @@ const hoveredId = ref(null)
 
 const videoRefs = ref({})
 const hlsMap = {}
-const cardErrors = ref({})
 
 // ─── 모달 상태 ───────────────────────────────────────────────────────────────
 const selectedCctv = ref(null)
-const modalVideoContainer = ref(null)
+const modalVideo = ref(null)
 let modalHls = null
 
 // ─── Intersection Observer ────────────────────────────────────────────────────
@@ -137,20 +131,13 @@ const setVideoRef = (el, cctvId) => {
 
 // ─── HLS 개별 제어 ────────────────────────────────────────────────────────────
 const initHlsForCard = (cctvId) => {
-  if (cardErrors.value[cctvId]) return // 재시도 대기 중 — 중복 초기화 방지
   const cctv = filteredList.value.find(c => c.cctvId === cctvId)
   const video = videoRefs.value[cctvId]
   if (!cctv || !video || !cctv.streamUrl) return
-  if (hlsMap[cctvId]) return // 이미 초기화됨
+  if (hlsMap[cctvId]) return
 
   if (Hls.isSupported()) {
-    const hls = new Hls({ enableWorker: false, debug: false })
-    hls.on(Hls.Events.ERROR, (_event, data) => {
-      if (data.fatal) {
-        cardErrors.value[cctvId] = true
-        destroyHlsForCard(cctvId)
-      }
-    })
+    const hls = new Hls({ enableWorker: false })
     hls.loadSource(cctv.streamUrl)
     hls.attachMedia(video)
     hlsMap[cctvId] = hls
@@ -184,38 +171,31 @@ const fetchList = async () => {
     cctvList.value = []
   } finally {
     loading.value = false
-    cardErrors.value = {}
   }
 }
 
 // ─── 모달 제어 ────────────────────────────────────────────────────────────────
-const openModal = (cctv) => {
+const openModal = async (cctv) => {
   selectedCctv.value = cctv
+  await nextTick()
+  const video = modalVideo.value
+  if (!video || !cctv.streamUrl) return
+
+  if (modalHls) { modalHls.destroy(); modalHls = null }
+
+  if (Hls.isSupported()) {
+    modalHls = new Hls({ enableWorker: false })
+    modalHls.loadSource(cctv.streamUrl)
+    modalHls.attachMedia(video)
+  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.src = cctv.streamUrl
+  }
 }
 
-watch(selectedCctv, async (cctv) => {
-  if (!cctv) return
-  await nextTick()
-  // 카드 video 요소를 모달 컨테이너로 DOM 이동 (HLS 인스턴스 유지 → 새 연결 없음)
-  const container = modalVideoContainer.value || document.querySelector('.modal-video')
-  const cardVideo = videoRefs.value[cctv.cctvId]
-  if (container && cardVideo) {
-    container.appendChild(cardVideo)
-  }
-})
-
 const closeModal = () => {
-  const closingCctv = selectedCctv.value
+  if (modalHls) { modalHls.destroy(); modalHls = null }
+  if (modalVideo.value) modalVideo.value.src = ''
   selectedCctv.value = null
-  // 카드 video 요소 원위치 복원
-  if (closingCctv?.cctvId) {
-    const cardEl = cardRefs[closingCctv.cctvId]
-    const movedVideo = document.querySelector('.modal-video video')
-    if (movedVideo && cardEl) {
-      const overlay = cardEl.querySelector('.cctv-overlay')
-      cardEl.insertBefore(movedVideo, overlay || null)
-    }
-  }
 }
 
 // ─── Page Visibility API ──────────────────────────────────────────────────────
@@ -236,27 +216,12 @@ const onKeydown = (e) => {
   if (e.key === 'Escape') closeModal()
 }
 
-// ─── filteredList 변경 시 HLS 재초기화 ───────────────────────────────────────
-watch(filteredList, async () => {
-  // 기존 카드 unobserve + HLS 파괴
+// ─── filteredList 변경 시 observer 재등록 ─────────────────────────────────────
+watch(filteredList, () => {
   Object.entries(cardRefs).forEach(([, el]) => observer.unobserve(el))
   Object.keys(cardRefs).forEach(k => delete cardRefs[k])
   destroyHls()
-  // DOM 업데이트 대기
-  await nextTick()
-  // 카드 재등록 + viewport 내 카드는 직접 HLS 초기화
-  // (IntersectionObserver 초기 콜백이 지연/미발화되는 경우 대비)
-  document.querySelectorAll('[data-cctv-id]').forEach(el => {
-    const cctvId = el.dataset.cctvId
-    if (!cctvId) return
-    cardRefs[cctvId] = el
-    observer.observe(el)
-    // viewport 안에 있는 카드는 즉시 초기화
-    const rect = el.getBoundingClientRect()
-    if (rect.bottom > 0 && rect.top < window.innerHeight) {
-      initHlsForCard(cctvId)
-    }
-  })
+  // observeCard는 :ref 바인딩으로 nextTick 후 자동 재등록됨
 })
 
 // ─── 생명주기 ─────────────────────────────────────────────────────────────────
@@ -479,36 +444,6 @@ onBeforeUnmount(() => {
   .cctv-grid { grid-template-columns: 1fr; }
 }
 
-/* ─── 스트림 에러 오버레이 ───────────────────────────────────────────────────── */
-.stream-error {
-  position: absolute;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.7);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 2;
-  border-radius: inherit;
-}
-
-.stream-error-inner {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  color: rgba(255, 255, 255, 0.8);
-  font-size: 12px;
-}
-
-.stream-error-icon {
-  font-size: 20px;
-  animation: spin 1.5s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
 /* ─── 모달 ─────────────────────────────────────────────────────────────────── */
 .modal-backdrop {
   position: fixed;
@@ -587,13 +522,6 @@ onBeforeUnmount(() => {
   aspect-ratio: 16 / 9;
   display: block;
   background: #000;
-  overflow: hidden;
-}
-
-.modal-video video {
-  width: 100%;
-  height: 100%;
   object-fit: cover;
-  display: block;
 }
 </style>

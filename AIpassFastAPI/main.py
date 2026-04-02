@@ -16,7 +16,8 @@ from services.aggregator import start_aggregators, stop_aggregators
 from services.webhook_client import webhook_client
 from utils.http_client import http_client
 from api import stream, cctv as cctv_router
-from services.cctv_refresher import start_cctv_refresh_loop
+from services.cctv_refresher import refresh_once, start_cctv_refresh_loop_only
+from services.weather_scraper import start_weather_loop
 
 logging.basicConfig(
     level=logging.INFO,
@@ -85,8 +86,15 @@ async def lifespan(app: FastAPI):
 
         start_aggregators()
 
-        # ITS API → DB CCTV URL 자동 갱신 (시작 즉시 1회 + 4시간 주기)
-        asyncio.create_task(start_cctv_refresh_loop())
+        # ITS API → DB CCTV URL 자동 갱신 (yield 이전 1회 await → 최신 URL 보장)
+        try:
+            await asyncio.wait_for(refresh_once(), timeout=20.0)
+        except Exception as e:
+            logger.warning("[CCTVRefresh] 초기 갱신 실패 — background 재시도 예정: %s", e)
+        asyncio.create_task(start_cctv_refresh_loop_only())
+
+        # Naver Weather → weather_log DB 자동 업데이트 (매일 오전 9시)
+        asyncio.create_task(start_weather_loop())
 
         logger.info("[SUCCESS] All services initialized. App is ready.")
         yield
