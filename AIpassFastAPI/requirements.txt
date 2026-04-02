@@ -28,3 +28,7 @@ python-dotenv==1.2.2
 
 # DB (Spring Boot 연동용 직접 쿼리 필요 시)
 psycopg2-binary==2.9.11
+
+# Web Scraping (Naver Weather — JS 렌더링)
+# 설치 후 한 번만 실행: python -m playwright install chromium
+playwright>=1.49.0

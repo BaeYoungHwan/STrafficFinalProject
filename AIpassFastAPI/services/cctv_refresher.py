@@ -142,3 +142,10 @@ async def start_cctv_refresh_loop():
     while True:
         await asyncio.sleep(REFRESH_INTERVAL_SEC)
         await refresh_once()
+
+
+async def start_cctv_refresh_loop_only():
+    """초기 갱신 없이 4시간 주기 반복만 실행 (lifespan에서 이미 갱신한 경우 사용)."""
+    while True:
+        await asyncio.sleep(REFRESH_INTERVAL_SEC)
+        await refresh_once()
