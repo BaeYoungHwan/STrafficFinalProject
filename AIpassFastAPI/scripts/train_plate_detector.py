@@ -58,8 +58,8 @@ def main():
 
     from ultralytics import YOLO
 
-    model = YOLO("yolov8n.pt")
-    logger.info("yolov8n.pt 로드 완료 — 학습 시작")
+    model = YOLO("yolo26n.pt")
+    logger.info("yolo26n.pt 로드 완료 — 학습 시작")
 
     model.train(
         data=str(patched_yaml),

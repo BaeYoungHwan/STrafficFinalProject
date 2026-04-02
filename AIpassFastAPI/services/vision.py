@@ -17,7 +17,7 @@ from utils.http_client import http_client
 logger = logging.getLogger(__name__)
 
 # 과속 위반 처리 큐 — process_event_loop에서 put, _violation_worker에서 1개씩 소비
-_violation_queue: asyncio.Queue = asyncio.Queue(maxsize=10)
+_violation_queue: asyncio.Queue = asyncio.Queue(maxsize=100)
 
 # carnumber 이미지 목록 캐시 (Process B에서 1회 로드)
 _CARNUMBER_IMAGES: list = []
@@ -136,7 +136,11 @@ def _inference_loop(model, meta_queue, event_queue, lock, stop_event,
             except queue.Empty:
                 continue
 
-            existing_shm = _shm_mod.SharedMemory(name=meta['shm_name'])
+            try:
+                existing_shm = _shm_mod.SharedMemory(name=meta['shm_name'])
+            except FileNotFoundError:
+                # 캡처 워커가 재연결 중 shm.unlink()로 삭제된 경우 — 다음 프레임 대기
+                continue
             try:
                 with lock:
                     frame = np.ndarray(meta['shape'], dtype=meta['dtype'],

@@ -4,10 +4,12 @@ import asyncio
 import logging
 from typing import AsyncGenerator
 
-from fastapi import APIRouter
-from fastapi.responses import StreamingResponse
+import httpx
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel
 
+from core.config import settings
 from services.vision import vision_engine
 from services.aggregator import congestion_engine
 from services.webhook_client import webhook_client

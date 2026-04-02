@@ -15,7 +15,8 @@ from services.vision import vision_engine
 from services.aggregator import start_aggregators, stop_aggregators
 from services.webhook_client import webhook_client
 from utils.http_client import http_client
-from api import stream
+from api import stream, cctv as cctv_router
+from services.cctv_refresher import start_cctv_refresh_loop
 
 logging.basicConfig(
     level=logging.INFO,
@@ -84,6 +85,9 @@ async def lifespan(app: FastAPI):
 
         start_aggregators()
 
+        # ITS API → DB CCTV URL 자동 갱신 (시작 즉시 1회 + 4시간 주기)
+        asyncio.create_task(start_cctv_refresh_loop())
+
         logger.info("[SUCCESS] All services initialized. App is ready.")
         yield
 
@@ -116,6 +120,7 @@ app.add_middleware(
 )
 
 app.include_router(stream.router, prefix="/api/v1")
+app.include_router(cctv_router.router, prefix="/api/v1")
 app.mount("/demo", StaticFiles(directory="static", html=True), name="demo")
 app.mount("/images", StaticFiles(directory="data"), name="images")
 
