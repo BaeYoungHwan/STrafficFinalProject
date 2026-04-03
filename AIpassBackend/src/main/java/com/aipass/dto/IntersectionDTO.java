@@ -8,15 +8,12 @@ public class IntersectionDTO {
     private String congestion;   // SMOOTH, SLOW, CONGESTED
     private int currentPhase;
     private int phaseRemaining;  // 남은 시간 (초)
-    private int greenTime;
-    private int yellowTime;
-    private int redTime;
     private int totalCycle;
 
     public IntersectionDTO() {}
 
     public IntersectionDTO(int id, String name, String location, String status, String congestion,
-                           int currentPhase, int phaseRemaining, int greenTime, int yellowTime, int redTime, int totalCycle) {
+                           int currentPhase, int phaseRemaining, int totalCycle) {
         this.id = id;
         this.name = name;
         this.location = location;
@@ -24,9 +21,6 @@ public class IntersectionDTO {
         this.congestion = congestion;
         this.currentPhase = currentPhase;
         this.phaseRemaining = phaseRemaining;
-        this.greenTime = greenTime;
-        this.yellowTime = yellowTime;
-        this.redTime = redTime;
         this.totalCycle = totalCycle;
     }
 
@@ -50,15 +44,6 @@ public class IntersectionDTO {
 
     public int getPhaseRemaining() { return phaseRemaining; }
     public void setPhaseRemaining(int phaseRemaining) { this.phaseRemaining = phaseRemaining; }
-
-    public int getGreenTime() { return greenTime; }
-    public void setGreenTime(int greenTime) { this.greenTime = greenTime; }
-
-    public int getYellowTime() { return yellowTime; }
-    public void setYellowTime(int yellowTime) { this.yellowTime = yellowTime; }
-
-    public int getRedTime() { return redTime; }
-    public void setRedTime(int redTime) { this.redTime = redTime; }
 
     public int getTotalCycle() { return totalCycle; }
     public void setTotalCycle(int totalCycle) { this.totalCycle = totalCycle; }

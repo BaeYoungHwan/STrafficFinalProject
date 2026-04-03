@@ -15,11 +15,6 @@ public interface TrafficMapper {
 
     TrafficIntersectionDTO findById(@Param("id") Long id);
 
-    void updateSignal(@Param("id") Long id,
-                      @Param("green") int green,
-                      @Param("yellow") int yellow,
-                      @Param("red") int red);
-
     List<TrafficFlowHourDTO> findFlowByHour(@Param("limit") int limit);
 
     Map<String, Object> findSummary();
