@@ -15,13 +15,38 @@ from services.vision import vision_engine
 from services.aggregator import start_aggregators, stop_aggregators
 from services.webhook_client import webhook_client
 from utils.http_client import http_client
-from api import stream
+from api import stream, cctv as cctv_router
+from services.cctv_refresher import refresh_once, start_cctv_refresh_loop_only
+from services.weather_scraper import start_weather_loop
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+async def _retry_cctv_url():
+    """Spring Boot가 뜰 때까지 30초 간격으로 ai-target 재시도 (최대 10회 = 5분)"""
+    for _ in range(10):
+        await asyncio.sleep(30)
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as c:
+                resp = await c.get(f"{settings.BACKEND_URL}/api/cctv/ai-target")
+                data = resp.json()
+                if data.get("success") and data.get("data", {}).get("url"):
+                    new_url = data["data"]["url"]
+                    new_id  = data["data"].get("cctvId", settings.CAMERA_ID)
+                    if new_url != vision_engine.rtsp_url:
+                        logger.info("[AI-Target] URL 갱신 — 엔진 재시작: %s", new_url)
+                        vision_engine.camera_id = new_id
+                        vision_engine.restart(new_url)
+                    else:
+                        logger.info("[AI-Target] URL 동일 — 재시작 불필요: %s", new_url)
+                    return
+        except Exception as e:
+            logger.debug("[AI-Target] 재시도 실패: %s", e)
+    logger.warning("[AI-Target] 재시도 5분 초과 — 포기")
 
 
 @asynccontextmanager
@@ -48,8 +73,10 @@ async def lifespan(app: FastAPI):
                     logger.info("[AI-Target] CCTV URL: %s", vision_engine.rtsp_url)
                 else:
                     logger.warning("[AI-Target] 응답 파싱 실패 — fallback URL 사용")
+                    asyncio.create_task(_retry_cctv_url())
         except Exception as e:
             logger.warning("[AI-Target] Spring Boot 미연결 — fallback URL 사용: %s", e)
+            asyncio.create_task(_retry_cctv_url())
 
         if vision_engine.rtsp_url:
             vision_engine.start()
@@ -58,6 +85,16 @@ async def lifespan(app: FastAPI):
             logger.warning("[Vision] VIDEO_SOURCE_URL 미설정 — 엔진 대기 중. POST /stream/source 로 URL 지정 후 시작 가능.")
 
         start_aggregators()
+
+        # ITS API → DB CCTV URL 자동 갱신 (yield 이전 1회 await → 최신 URL 보장)
+        try:
+            await asyncio.wait_for(refresh_once(), timeout=20.0)
+        except Exception as e:
+            logger.warning("[CCTVRefresh] 초기 갱신 실패 — background 재시도 예정: %s", e)
+        asyncio.create_task(start_cctv_refresh_loop_only())
+
+        # Naver Weather → weather_log DB 자동 업데이트 (매일 오전 9시)
+        asyncio.create_task(start_weather_loop())
 
         logger.info("[SUCCESS] All services initialized. App is ready.")
         yield
@@ -91,6 +128,7 @@ app.add_middleware(
 )
 
 app.include_router(stream.router, prefix="/api/v1")
+app.include_router(cctv_router.router, prefix="/api/v1")
 app.mount("/demo", StaticFiles(directory="static", html=True), name="demo")
 app.mount("/images", StaticFiles(directory="data"), name="images")
 

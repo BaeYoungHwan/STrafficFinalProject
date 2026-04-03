@@ -3,6 +3,20 @@
     <!-- 페이지 헤더 -->
     <div class="page-header">
       <h2 class="page-title">실시간 구간별 혼잡도 모니터링</h2>
+      <div class="refresh-controls">
+        <span class="last-updated" v-if="lastUpdated">
+          최종 갱신: {{ lastUpdated.toLocaleTimeString('ko-KR') }}
+        </span>
+        <select class="refresh-select" v-model.number="refreshInterval">
+          <option :value="30000">30초</option>
+          <option :value="60000">1분</option>
+          <option :value="300000">5분</option>
+          <option :value="0">끄기</option>
+        </select>
+        <button class="refresh-btn" @click="refreshAllWidgets" :disabled="isRefreshing">
+          <span :class="{ 'spin': isRefreshing }">↻</span>
+        </button>
+      </div>
     </div>
 
     <!-- 지도 섹션 -->
@@ -45,7 +59,7 @@
           </template>
           <template v-else>
             <div class="traffic-count">
-              <span class="count-number">{{ trafficSummary.todayCount ?? '--' }}</span>
+              <span class="count-number">{{ trafficSummary.todayCount != null ? trafficSummary.todayCount.toLocaleString() : '--' }}</span>
               <span class="count-unit">건</span>
             </div>
             <div class="traffic-change" :class="changeClass">
@@ -251,7 +265,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
@@ -285,9 +299,14 @@ const trafficLoading = ref(true)
 const cctvStatus = ref({})
 const cctvStatusLoading = ref(true)
 
+// ─── 자동 새로고침 ────────────────────────────────────────────────────────────
+const refreshInterval = ref(60000)   // 기본값: 1분
+const lastUpdated = ref(null)
+const isRefreshing = ref(false)
+
 // ─── 혼잡도 폴리라인 ──────────────────────────────────────────────────────────
 let congestionPolylines = []
-let congestionTimer = null
+let autoRefreshTimer = null
 let routeGeometryCache = {}   // "fromId-toId" → [[lat,lng], ...] 캐시
 
 // ─── 방향 필터 ────────────────────────────────────────────────────────────────
@@ -606,6 +625,33 @@ const fetchCctvStatus = async () => {
   }
 }
 
+// ─── 전체 위젯 새로고침 ───────────────────────────────────────────────────────
+async function refreshAllWidgets() {
+  isRefreshing.value = true
+  await Promise.all([
+    fetchViolations(),
+    fetchWeather(),
+    fetchTrafficSummary(),
+    fetchCctvStatus(),
+    fetchRoadCongestion()
+  ])
+  lastUpdated.value = new Date()
+  isRefreshing.value = false
+}
+
+function startAutoRefresh() {
+  stopAutoRefresh()
+  if (refreshInterval.value === 0) return
+  autoRefreshTimer = setInterval(refreshAllWidgets, refreshInterval.value)
+}
+
+function stopAutoRefresh() {
+  if (autoRefreshTimer) {
+    clearInterval(autoRefreshTimer)
+    autoRefreshTimer = null
+  }
+}
+
 // ─── API: 도로 혼잡도 ─────────────────────────────────────────────────────────
 const fetchRoadCongestion = async () => {
   if (!map) return
@@ -630,6 +676,9 @@ const openWeather = () => {
   window.open('https://weather.naver.com/map/09110615', '_blank')
 }
 
+// ─── 새로고침 간격 변경 감지 ──────────────────────────────────────────────────
+watch(refreshInterval, () => startAutoRefresh())
+
 // ─── 생명주기 ─────────────────────────────────────────────────────────────────
 onMounted(async () => {
   await nextTick()
@@ -645,11 +694,12 @@ onMounted(async () => {
     fetchRoadCongestion()
   ])
 
-  congestionTimer = setInterval(fetchRoadCongestion, 30000)
+  lastUpdated.value = new Date()
+  startAutoRefresh()
 })
 
 onUnmounted(() => {
-  if (congestionTimer) clearInterval(congestionTimer)
+  stopAutoRefresh()
   if (modalHls) { modalHls.destroy(); modalHls = null }
   if (map) { map.remove(); map = null }
   document.removeEventListener('keydown', onKeydown)
@@ -667,6 +717,61 @@ onUnmounted(() => {
 /* ─── 헤더 ──────────────────────────────────────────────────────────────────── */
 .page-header {
   margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.refresh-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: #94A3B8;
+}
+
+.last-updated {
+  white-space: nowrap;
+}
+
+.refresh-select {
+  background: #1E293B;
+  color: #E2E8F0;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.refresh-btn {
+  background: #1E293B;
+  color: #60A5FA;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.refresh-btn:hover:not(:disabled) {
+  background: #334155;
+}
+
+.refresh-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.spin {
+  display: inline-block;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .page-title {

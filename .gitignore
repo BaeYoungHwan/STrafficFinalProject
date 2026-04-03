@@ -20,6 +20,7 @@ AIpassFrontend/node_modules/
 AIpassFrontend/dist/
 node_modules/
 AIpassFastAPI/data/debug/
+AIpassFastAPI/data/carnumber01/
 /CLAUDE.md
 
 .claude/

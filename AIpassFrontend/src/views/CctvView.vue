@@ -16,18 +16,6 @@
       </button>
     </div>
 
-    <!-- 지역구 필터 탭 -->
-    <div class="district-tabs" v-if="districts.length > 1">
-      <button
-        v-for="d in districts"
-        :key="d"
-        class="tab-btn"
-        :class="{ active: (d === '전체' && !activeDistrict) || d === activeDistrict }"
-        @click="activeDistrict = d === '전체' ? '' : d"
-      >
-        {{ d }}
-      </button>
-    </div>
 
     <!-- 로딩 스켈레톤 -->
     <div v-if="loading" class="cctv-grid">
@@ -60,6 +48,7 @@
           muted
           playsinline
         ></video>
+
         <div class="cctv-overlay">
           <span class="cctv-name">{{ cctv.cctvName }}</span>
           <div class="cctv-meta">
@@ -82,7 +71,7 @@
             </div>
             <button class="modal-close" @click="closeModal">✕</button>
           </div>
-          <div ref="modalVideoContainer" class="modal-video"></div>
+          <video ref="modalVideo" class="modal-video" autoplay muted playsinline></video>
         </div>
       </div>
     </Teleport>
@@ -98,14 +87,13 @@ import api from '../api'
 const cctvList = ref([])
 const loading = ref(false)
 const hoveredId = ref(null)
-const activeDistrict = ref('')
 
 const videoRefs = ref({})
 const hlsMap = {}
 
 // ─── 모달 상태 ───────────────────────────────────────────────────────────────
 const selectedCctv = ref(null)
-const modalVideoContainer = ref(null)
+const modalVideo = ref(null)
 let modalHls = null
 
 // ─── Intersection Observer ────────────────────────────────────────────────────
@@ -133,17 +121,7 @@ const observeCard = (el, cctvId) => {
 }
 
 // ─── 계산 속성 ────────────────────────────────────────────────────────────────
-const districts = computed(() => {
-  const set = new Set(cctvList.value.map(c => c.district).filter(Boolean))
-  return ['전체', ...Array.from(set)]
-})
-
-const filteredList = computed(() => {
-  if (!activeDistrict.value || activeDistrict.value === '전체') {
-    return cctvList.value.slice(0, 12)
-  }
-  return cctvList.value.filter(c => c.district === activeDistrict.value).slice(0, 12)
-})
+const filteredList = computed(() => cctvList.value.slice(0, 12))
 
 // ─── video ref 등록 ───────────────────────────────────────────────────────────
 const setVideoRef = (el, cctvId) => {
@@ -156,7 +134,7 @@ const initHlsForCard = (cctvId) => {
   const cctv = filteredList.value.find(c => c.cctvId === cctvId)
   const video = videoRefs.value[cctvId]
   if (!cctv || !video || !cctv.streamUrl) return
-  if (hlsMap[cctvId]) return // 이미 초기화됨
+  if (hlsMap[cctvId]) return
 
   if (Hls.isSupported()) {
     const hls = new Hls({ enableWorker: false })
@@ -197,33 +175,27 @@ const fetchList = async () => {
 }
 
 // ─── 모달 제어 ────────────────────────────────────────────────────────────────
-const openModal = (cctv) => {
+const openModal = async (cctv) => {
   selectedCctv.value = cctv
+  await nextTick()
+  const video = modalVideo.value
+  if (!video || !cctv.streamUrl) return
+
+  if (modalHls) { modalHls.destroy(); modalHls = null }
+
+  if (Hls.isSupported()) {
+    modalHls = new Hls({ enableWorker: false })
+    modalHls.loadSource(cctv.streamUrl)
+    modalHls.attachMedia(video)
+  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.src = cctv.streamUrl
+  }
 }
 
-watch(selectedCctv, async (cctv) => {
-  if (!cctv) return
-  await nextTick()
-  // 카드 video 요소를 모달 컨테이너로 DOM 이동 (HLS 인스턴스 유지 → 새 연결 없음)
-  const container = modalVideoContainer.value || document.querySelector('.modal-video')
-  const cardVideo = videoRefs.value[cctv.cctvId]
-  if (container && cardVideo) {
-    container.appendChild(cardVideo)
-  }
-})
-
 const closeModal = () => {
-  const closingCctv = selectedCctv.value
+  if (modalHls) { modalHls.destroy(); modalHls = null }
+  if (modalVideo.value) modalVideo.value.src = ''
   selectedCctv.value = null
-  // 카드 video 요소 원위치 복원
-  if (closingCctv?.cctvId) {
-    const cardEl = cardRefs[closingCctv.cctvId]
-    const movedVideo = document.querySelector('.modal-video video')
-    if (movedVideo && cardEl) {
-      const overlay = cardEl.querySelector('.cctv-overlay')
-      cardEl.insertBefore(movedVideo, overlay || null)
-    }
-  }
 }
 
 // ─── Page Visibility API ──────────────────────────────────────────────────────
@@ -246,7 +218,6 @@ const onKeydown = (e) => {
 
 // ─── filteredList 변경 시 observer 재등록 ─────────────────────────────────────
 watch(filteredList, () => {
-  // 기존 등록된 카드 전체 unobserve
   Object.entries(cardRefs).forEach(([, el]) => observer.unobserve(el))
   Object.keys(cardRefs).forEach(k => delete cardRefs[k])
   destroyHls()
@@ -337,33 +308,6 @@ onBeforeUnmount(() => {
   transform: none;
 }
 
-/* 지역구 탭 */
-.district-tabs {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 20px;
-  flex-wrap: wrap;
-}
-
-.tab-btn {
-  padding: 6px 16px;
-  border-radius: 20px;
-  border: 1.5px solid #E2E8F0;
-  background: #fff;
-  color: #6B7280;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  font-family: inherit;
-}
-
-.tab-btn.active,
-.tab-btn:hover {
-  background: #1A6DCC;
-  color: #fff;
-  border-color: #1A6DCC;
-}
 
 /* 그리드 */
 .cctv-grid {
@@ -578,13 +522,6 @@ onBeforeUnmount(() => {
   aspect-ratio: 16 / 9;
   display: block;
   background: #000;
-  overflow: hidden;
-}
-
-.modal-video video {
-  width: 100%;
-  height: 100%;
   object-fit: cover;
-  display: block;
 }
 </style>

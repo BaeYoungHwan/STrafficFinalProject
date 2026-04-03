@@ -531,7 +531,7 @@ SELECT cctv_id, cctv_name, is_active FROM cctv_info;
 ALTER TABLE violation_log
   ADD COLUMN IF NOT EXISTS image_url VARCHAR(255);
 
-select * from  violation_log;
+select * from  maintenance_log;
 -- =========================================================================
 -- [최종 확정] violation_log 컬럼 보강 — 안전 적용 (IF NOT EXISTS)
 -- 과속 감지 파이프라인에 필요한 모든 컬럼을 일괄 추가한다.
@@ -543,6 +543,9 @@ ALTER TABLE violation_log
   ADD COLUMN IF NOT EXISTS event_id     VARCHAR(100),
   ADD COLUMN IF NOT EXISTS speed_kmh    NUMERIC(5,1),
   ADD COLUMN IF NOT EXISTS image_url    VARCHAR(255);
+  
+TRUNCATE TABLE violation_log; 
+TRUNCATE TABLE cctv_info; 
 
 -- event_id UNIQUE 인덱스 (중복 단속 이벤트 방지 — ON CONFLICT DO NOTHING 전제)
 CREATE UNIQUE INDEX IF NOT EXISTS uq_violation_event_id
@@ -555,39 +558,29 @@ ALTER TABLE violation_log ADD COLUMN src_image_url VARCHAR(255)
 
 ALTER TABLE violation_log RENAME COLUMN is_corrected TO needs_review;
 
+select * from cctv_info;
 
-UPDATE cctv_info SET cctv_name = '[국도48호선] 강화 강화대교',     road_name = '국도48호선', latitude = 37.73535000,   longitude = 126.52046400,  stream_url =                                         
-  'http://cctvsec.ktict.co.kr/4700/7IwvywijJon8b57nEHyy/HICmHjDNZlzApokgfyIqcbcfjCcDjc0+oUyzDpNUdp5O8lYWm58GSkXEEwkXg/JrL3G1xnXqhUpO2lu40uPJkw=',   district = '강화군', is_active = true, updated_at =  
-  NOW() WHERE cctv_id = 'ITS_4700';                                                                                                                                                                      
-  UPDATE cctv_info SET cctv_name = '[국도 48호선] 강화 용정리',       road_name = '국도48호선', latitude = 37.73985000,   longitude = 126.51006700,  stream_url =                                          'http://cctvsec.ktict.co.kr/5580/8wSLp996ULDNH2w3f/6PjfPTiAvevnyGL/rD7Y0Bh/84UGakdb7C4ge3bvIRl11+EV8POcP2z/m69sV+GCFONsO6wDpq0O0MTTAgw9hSvcc=',   district = '강화군', is_active = true, updated_at =  
-  NOW() WHERE cctv_id = 'ITS_5580';                                                                                                                                                                      
-  UPDATE cctv_info SET cctv_name = '[국도48호선] 강화 옥림교차로',   road_name = '국도48호선', latitude = 37.75019720,   longitude = 126.50693030,  stream_url =
-  'http://cctvsec.ktict.co.kr/8929/QkzpjCShd28fpfF41VJbULAMhdRd+4tz/UhGmbFo5VZCZrpu/SuQZMey1iayOVA6t0CttUMdspfB2eAJxP+mcs1t2tYSmx5Sznk+gJ+Mp4U=',   district = '강화군', is_active = true, updated_at =
-  NOW() WHERE cctv_id = 'ITS_8929';
-  UPDATE cctv_info SET cctv_name = '[국도 48호선] 강화 대산교차로',  road_name = '국도48호선', latitude = 37.76106490,   longitude = 126.49476600,  stream_url =
-  'http://cctvsec.ktict.co.kr/5598/yLVkcgzztFqSINX0+W0MkBm6hEAte3UbruVaFwBrtrQtkalODbCkLZDerGBKtYwS+S87mXxAAtVeKhWZs0IxYjbAILduC/U0dzjDiHJKUTA=',   district = '강화군', is_active = true, updated_at =  
-  NOW() WHERE cctv_id = 'ITS_5598';
-  UPDATE cctv_info SET cctv_name = '[국도 48호선] 강화 신당교차로',  road_name = '국도48호선', latitude = 37.76331700,   longitude = 126.46933300,  stream_url =
-  'http://cctvsec.ktict.co.kr/5578/zgEA+DENzpI4yyK1JBqi2yt2xT+/9SkuuT5617Gpu12lhUonwEdihWiXZrmuk4ih6+pSzPIg86Y7cTcykwIEQsWSvjq6d2TdYL8vp918Cpw=',   district = '강화군', is_active = true, updated_at =  
-  NOW() WHERE cctv_id = 'ITS_5578';
-  UPDATE cctv_info SET cctv_name = '[국도48] 강화 하도교',           road_name = '국도48호선', latitude = 37.76686200,   longitude = 126.45270700,  stream_url =
-  'http://cctvsec.ktict.co.kr/41232/sFksntaQq9QVq1ZKFKtGUrh/IBcwPwhPSeS4SPDPD5pd7W7lUCVCCtyi8j7/MLV1E/gyWmg9pn/T9rek+4Pc2u1LgHH36RdkPQVSWM3t3R4=',  district = '강화군', is_active = true, updated_at =  
-  NOW() WHERE cctv_id = 'ITS_41232';
-  UPDATE cctv_info SET cctv_name = '[국도48호선] 강화 부근교차로',   road_name = '국도48호선', latitude = 37.77110120,   longitude = 126.44214810,  stream_url =
-  'http://cctvsec.ktict.co.kr/8928/Cm8BQg4eON/6pfjDCqcc5hGSk7UQufDUfXP1AkIuYcSuEY/GppgYSHV8ZKkRqsqotMK+nXs/5qrxFtoUQnmVOo/i27nXaku3+t6lDAFkjw8=',   district = '강화군', is_active = true, updated_at =  
-  NOW() WHERE cctv_id = 'ITS_8928';
-  UPDATE cctv_info SET cctv_name = '[국도 48호선] 강화 하점교차로',  road_name = '국도48호선', latitude = 37.77137000,   longitude = 126.42429100,  stream_url =
-  'http://cctvsec.ktict.co.kr/5597/UYUCWwoxtrPJ2m59QHve8paHFcrzAxnMbnrOVYHTKEYhZNtIzcGU02+NoieeqShbl5M+prKLkm/5bgRr2V1D7C7+XjQsVOLsjfGpSwJ/O0c=',   district = '강화군', is_active = true, updated_at =  
-  NOW() WHERE cctv_id = 'ITS_5597';
-  UPDATE cctv_info SET cctv_name = '[국도 48호선] 강화 이강교차로',  road_name = '국도48호선', latitude = 37.78161700,   longitude = 126.40008300,  stream_url =
-  'http://cctvsec.ktict.co.kr/5579/sr0VocpD35/DBLTl+3knuiA02OqPahJOeCfuroqd281/NLyod9LPXtvOSim2K/Wxb1ayWUfgZJk5ayCo3jKHEbBha8jkMLo30Tzl19JZgi4=',   district = '강화군', is_active = true, updated_at =  
-  NOW() WHERE cctv_id = 'ITS_5579';
-  UPDATE cctv_info SET cctv_name = '[국도48호선] 강화 소방심신휴센터', road_name = '국도48호선', latitude = 37.78440278, longitude = 126.38579167,  stream_url =
-  'http://cctvsec.ktict.co.kr/5436/FIAiC2usd8JjQbH620Vns1TtZ1zXeiXkyH7EX2aiyyO3uWZHvedtFd+Rzj9BfqiqapAl9Htl9j7o4GMk50ubylg7EKFl10kt3Qp8Rq4j2Ng=',  district = '강화군', is_active = true, updated_at =   
-  NOW() WHERE cctv_id = 'ITS_5436';
-  UPDATE cctv_info SET cctv_name = '[국도48호선] 강화 인화삼거리',   road_name = '국도48호선', latitude = 37.78670500,   longitude = 126.35553000,  stream_url =
-  'http://cctvsec.ktict.co.kr/71675/3PrWmFXNgndaaYwNQIoCqx03pQk236GgA52AFfQaNG7/gssclxlYhbOsEmyDZplCCI7wwB76dFD4N7+TNVBGKzzQGVcm79r+QCn5BLaBt5w=',  district = '강화군', is_active = true, updated_at =  
-  NOW() WHERE cctv_id = 'ITS_71675';
-  UPDATE cctv_info SET cctv_name = '[국도48호선] 강화 송산삼거리',   road_name = '국도48호선', latitude = 37.78941100,   longitude = 126.37250100,  stream_url =
-  'http://cctvsec.ktict.co.kr/71453/zTORwTCuVTW1huxrhmOSm1iAR01EC2NB9ce38BZpVTeVLlkblg1Xdkh6xynSWZJ0apbBjaqDoXOy0tVN0n8ym6VCP626zO7MqbDZMy+ZbUI=',  district = '강화군', is_active = true, updated_at =  
-  NOW() WHERE cctv_id = 'ITS_71453';
+ UPDATE cctv_info SET stream_url = 'http://cctvsec.ktict.co.kr/4700/7IwvywijJon8b57nEHyy/HICmHjDNZlzApokgfyIqcbcfjCcDjc0+oUyzDpNUdp59xYv4FXVSk6+5BLbdnYRTUWhH4jjaaLVz5HNJeiLfzo=',   updated_at =       
+  CURRENT_TIMESTAMP WHERE cctv_id = '4700';                                                                                                                                                                
+  UPDATE cctv_info SET stream_url = 'http://cctvsec.ktict.co.kr/5580/8wSLp996ULDNH2w3f/6PjfPTiAvevnyGL/rD7Y0Bh/84UGakdb7C4ge3bvIRl11+IO1joVPqSOcPRiYAPyQYk4GuMX6fvVYOETlLIn5PVQM=',  updated_at =        
+  CURRENT_TIMESTAMP WHERE cctv_id = '5580';                                                                                                                                                                
+  UPDATE cctv_info SET stream_url = 'http://cctvsec.ktict.co.kr/8929/QkzpjCShd28fpfF41VJbULAMhdRd+4tz/UhGmbFo5VZCZrpu/SuQZMey1iayOVA6uB86GQ7nbYI8mv+nin0+pf12Ey1rA+kwoRlyCDFmogE=',  updated_at =        
+  CURRENT_TIMESTAMP WHERE cctv_id = '8929';
+  UPDATE cctv_info SET stream_url = 'http://cctvsec.ktict.co.kr/5598/yLVkcgzztFqSINX0+W0MkBm6hEAte3UbruVaFwBrtrQtkalODbCkLZDerGBKtYwSIBbVHMS//sCzzZFquNLL2yitJc8uNoZTZzHAx3UvvaA=',  updated_at =
+  CURRENT_TIMESTAMP WHERE cctv_id = '5598';
+  UPDATE cctv_info SET stream_url = 'http://cctvsec.ktict.co.kr/5578/zgEA+DENzpI4yyK1JBqi2yt2xT+/9SkuuT5617Gpu12lhUonwEdihWiXZrmuk4ihrODhK0pnW3okrg+p6WOLKxZOnSBxEb34BhmqY4p1YvE=',  updated_at =        
+  CURRENT_TIMESTAMP WHERE cctv_id = '5578';
+  UPDATE cctv_info SET stream_url = 'http://cctvsec.ktict.co.kr/41232/sFksntaQq9QVq1ZKFKtGUrh/IBcwPwhPSeS4SPDPD5pd7W7lUCVCCtyi8j7/MLV1IE3hccYI/ynXesI5/V6U68E1SwvpmybyoMUP+M1/Szs=', updated_at =        
+  CURRENT_TIMESTAMP WHERE cctv_id = '41232';
+  UPDATE cctv_info SET stream_url = 'http://cctvsec.ktict.co.kr/8928/Cm8BQg4eON/6pfjDCqcc5hGSk7UQufDUfXP1AkIuYcSuEY/GppgYSHV8ZKkRqsqoeLDI9lbgra55rDevWeEWfrl+xW4c/JonZduio4XPCEA=',  updated_at =        
+  CURRENT_TIMESTAMP WHERE cctv_id = '8928';
+  UPDATE cctv_info SET stream_url = 'http://cctvsec.ktict.co.kr/5597/UYUCWwoxtrPJ2m59QHve8paHFcrzAxnMbnrOVYHTKEYhZNtIzcGU02+NoieeqShb1X01+rSBxQMRY0/R/AFCnUexXimiKSuho0drjIcIyQA=',  updated_at =        
+  CURRENT_TIMESTAMP WHERE cctv_id = '5597';
+  UPDATE cctv_info SET stream_url = 'http://cctvsec.ktict.co.kr/5579/sr0VocpD35/DBLTl+3knuiA02OqPahJOeCfuroqd281/NLyod9LPXtvOSim2K/WxSdZG2UzDyNhkMOdL0sOxpAZJs6z+62S2kwx1PfOjk4s=',  updated_at =        
+  CURRENT_TIMESTAMP WHERE cctv_id = '5579';
+  UPDATE cctv_info SET stream_url = 'http://cctvsec.ktict.co.kr/5436/FIAiC2usd8JjQbH620Vns1TtZ1zXeiXkyH7EX2aiyyO3uWZHvedtFd+Rzj9BfqiqwwrLmDdYRnsHn0biUNyxXrduYEuAgkKgiuxQxXfO2FU=',  updated_at =        
+  CURRENT_TIMESTAMP WHERE cctv_id = '5436';
+  UPDATE cctv_info SET stream_url = 'http://cctvsec.ktict.co.kr/71675/3PrWmFXNgndaaYwNQIoCqx03pQk236GgA52AFfQaNG7/gssclxlYhbOsEmyDZplC8FNCwGoP8QBpzyBv72YiDuYZjGsJm1qtFk+AWdN6vP0=', updated_at =        
+  CURRENT_TIMESTAMP WHERE cctv_id = '71675';
+  UPDATE cctv_info SET stream_url = 'http://cctvsec.ktict.co.kr/71453/zTORwTCuVTW1huxrhmOSm1iAR01EC2NB9ce38BZpVTeVLlkblg1Xdkh6xynSWZJ0QQSoZBTUNJoW/GRtZNumT6pjUo1sm8Cr6hbnwF4wgIo=', updated_at =        
+  CURRENT_TIMESTAMP WHERE cctv_id = '71453';

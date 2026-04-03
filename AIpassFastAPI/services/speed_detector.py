@@ -22,10 +22,10 @@ src_pts = np.array([[285, 460], [615, 460], [560, 300], [445, 300]], dtype=np.fl
 dst_pts = np.array([[0, 0], [20, 0], [20, 55], [0, 55]], dtype=np.float32)
 HOMOGRAPHY_MATRIX = cv2.getPerspectiveTransform(src_pts, dst_pts)
 
-# 역방향(서울↑) 전용 호모그래피 — y=240-300 영역 (추정값, 실측 후 보정 필요)
-# 강화대교 역방향 차선: 카메라에서 멀어지는 방향, 화면 상단에 위치
-src_pts_rev = np.array([[330, 240], [560, 240], [560, 300], [285, 300]], dtype=np.float32)
-dst_pts_rev = np.array([[0, 0], [16, 0], [16, 20], [0, 20]], dtype=np.float32)
+# 역방향(서울↑) 전용 호모그래피 — y=180-300 영역으로 확장 (120px → 약 40m 구간)
+# 하행과 동일한 m/px 비율(~0.34m/px) 적용, 실측 후 보정 권장
+src_pts_rev = np.array([[350, 180], [540, 180], [560, 300], [285, 300]], dtype=np.float32)
+dst_pts_rev = np.array([[0, 0], [16, 0], [16, 40], [0, 40]], dtype=np.float32)
 HOMOGRAPHY_MATRIX_REVERSE = cv2.getPerspectiveTransform(src_pts_rev, dst_pts_rev)
 
 def get_real_world_distance(pt1, pt2):
