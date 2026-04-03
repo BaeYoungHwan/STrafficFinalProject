@@ -59,7 +59,7 @@
           </template>
           <template v-else>
             <div class="traffic-count">
-              <span class="count-number">{{ trafficSummary.todayCount ?? '--' }}</span>
+              <span class="count-number">{{ trafficSummary.todayCount != null ? trafficSummary.todayCount.toLocaleString() : '--' }}</span>
               <span class="count-unit">건</span>
             </div>
             <div class="traffic-change" :class="changeClass">
