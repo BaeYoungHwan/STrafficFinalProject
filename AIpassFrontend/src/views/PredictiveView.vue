@@ -204,7 +204,13 @@ const MOCK_EQUIPMENTS = [
   { id: 3, name: 'CAM03', riskLevel: 'MEDIUM',   rul: 150, status: 'REQUESTED',   motorCurrent: 18.5, vibration: 3.2, temperature: 62, riskScore: 0.45, lastInspection: '2026.03.12', installDate: '2022.11.10' },
   { id: 4, name: 'CAM04', riskLevel: 'MEDIUM',   rul: 120, status: 'IN_PROGRESS', motorCurrent: 19.1, vibration: 4.0, temperature: 68, riskScore: 0.52, lastInspection: '2026.03.10', installDate: '2022.08.05' },
   { id: 5, name: 'CAM05', riskLevel: 'HIGH',     rul: 30,  status: 'REQUIRED',    motorCurrent: 24.5, vibration: 5.8, temperature: 78, riskScore: 0.74, lastInspection: '2026.03.08', installDate: '2021.12.20' },
-  { id: 6, name: 'CAM06', riskLevel: 'CRITICAL', rul: 3,   status: 'REQUIRED',    motorCurrent: 32.1, vibration: 8.5, temperature: 95, riskScore: 0.93, lastInspection: '2026.03.05', installDate: '2021.03.15' },
+  { id: 6,  name: 'CAM06', riskLevel: 'CRITICAL', rul: 3,   status: 'REQUIRED',    motorCurrent: 32.1, vibration: 8.5, temperature: 95, riskScore: 0.93, lastInspection: '2026.03.05', installDate: '2021.03.15' },
+  { id: 7,  name: 'CAM07', riskLevel: 'LOW',      rul: 290, status: 'OPERATIONAL', motorCurrent: 14.5, vibration: 1.1, temperature: 44, riskScore: 0.10, lastInspection: '2026.03.20', installDate: '2023.09.01' },
+  { id: 8,  name: 'CAM08', riskLevel: 'LOW',      rul: 278, status: 'OPERATIONAL', motorCurrent: 15.0, vibration: 1.3, temperature: 46, riskScore: 0.13, lastInspection: '2026.03.19', installDate: '2023.10.15' },
+  { id: 9,  name: 'CAM09', riskLevel: 'MEDIUM',   rul: 135, status: 'REQUESTED',   motorCurrent: 17.9, vibration: 3.5, temperature: 64, riskScore: 0.48, lastInspection: '2026.03.11', installDate: '2022.09.22' },
+  { id: 10, name: 'CAM10', riskLevel: 'MEDIUM',   rul: 100, status: 'IN_PROGRESS', motorCurrent: 20.3, vibration: 4.2, temperature: 70, riskScore: 0.55, lastInspection: '2026.03.09', installDate: '2022.06.18' },
+  { id: 11, name: 'CAM11', riskLevel: 'HIGH',     rul: 25,  status: 'REQUIRED',    motorCurrent: 25.8, vibration: 6.1, temperature: 80, riskScore: 0.78, lastInspection: '2026.03.07', installDate: '2021.10.05' },
+  { id: 12, name: 'CAM12', riskLevel: 'CRITICAL', rul: 2,   status: 'REQUIRED',    motorCurrent: 33.4, vibration: 9.0, temperature: 98, riskScore: 0.96, lastInspection: '2026.03.04', installDate: '2020.12.10' },
 ]
 
 // ── 색상 설정 ─────────────────────────────────────────────────
