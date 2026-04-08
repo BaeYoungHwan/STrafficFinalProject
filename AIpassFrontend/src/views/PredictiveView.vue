@@ -1,94 +1,115 @@
 <template>
-  <div class="page-container">
-    <!-- 페이지 헤더 -->
-    <div class="page-header">
-      <div class="header-left">
-        <h2 class="page-title">설비 예지보전</h2>
-        <span class="equipment-count">{{ filteredEquipments.length }}개</span>
-      </div>
-      <div class="header-filters">
-        <select v-model="riskFilter" class="filter-select">
-          <option value="">위험도 전체</option>
-          <option value="LOW">정상 (LOW)</option>
-          <option value="MEDIUM">주의 (MEDIUM)</option>
-          <option value="HIGH">경고 (HIGH)</option>
-          <option value="CRITICAL">위험 (CRITICAL)</option>
-        </select>
-        <select v-model="statusFilter" class="filter-select">
-          <option value="">상태 전체</option>
-          <option value="OPERATIONAL">정상가능</option>
-          <option value="REQUESTED">점검요청</option>
-          <option value="IN_PROGRESS">점검중</option>
-          <option value="REQUIRED">점검요망</option>
-        </select>
+  <div class="predictive">
+    <!-- 섹션 헤더 -->
+    <div class="section-header">
+      <h2 class="section-title">장비 정보 조회</h2>
+      <button class="btn-refresh" @click="fetchEquipments" title="새로 고침">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+        </svg>
+        새로 고침
+      </button>
+    </div>
+
+    <!-- 필터 패널 -->
+    <div class="filter-panel">
+      <div class="filter-row">
+        <div class="filter-item">
+          <select v-model="filters.equipment">
+            <option value="">장비 전체</option>
+            <option value="CAM">CAM (카메라)</option>
+          </select>
+        </div>
+        <div class="filter-item">
+          <select v-model="filters.riskLevel">
+            <option value="">위험도 전체</option>
+            <option value="LOW">정상</option>
+            <option value="MEDIUM">주의</option>
+            <option value="HIGH">경고</option>
+            <option value="CRITICAL">위험</option>
+          </select>
+        </div>
+        <div class="filter-item">
+          <select v-model="filters.status">
+            <option value="">상태 전체</option>
+            <option value="정상가동">정상가동</option>
+            <option value="통신오류">통신오류</option>
+            <option value="점검중">점검중</option>
+            <option value="점검요망">점검요망</option>
+          </select>
+        </div>
+        <div class="filter-actions">
+          <button class="btn-search" @click="search">검 색</button>
+          <button class="btn-reset" @click="reset">초기화</button>
+        </div>
       </div>
     </div>
 
-    <!-- 메인 콘텐츠 영역 -->
-    <div class="content-area" :class="{ 'panel-open': selectedEquipment }">
-      <!-- 테이블 영역 -->
-      <div class="table-section">
-        <div class="table-card">
-          <table class="equipment-table">
+    <!-- 콘텐츠 영역 -->
+    <div class="content-area" :class="{ 'has-detail': selectedEquipment }">
+      <!-- 목록 -->
+      <div class="list-section">
+        <div class="table-wrap">
+          <table>
             <thead>
               <tr>
-                <th>No.</th>
-                <th>장비 정보</th>
-                <th>주요 지표</th>
+                <th>No</th>
+                <th>장비정보</th>
+                <template v-if="!selectedEquipment">
+                  <th>모터전류 (A)</th>
+                  <th>베어링진동 (mm/s)</th>
+                </template>
                 <th>위험도</th>
-                <th>잔여 수명</th>
+                <template v-if="!selectedEquipment">
+                  <th>잔여수명</th>
+                </template>
                 <th>상태</th>
-                <th>최근 점검일</th>
+                <th>최근점검일</th>
               </tr>
             </thead>
             <tbody>
+              <tr v-if="loading">
+                <td :colspan="selectedEquipment ? 5 : 7" class="loading-cell">불러오는 중...</td>
+              </tr>
+              <tr v-else-if="items.length === 0">
+                <td :colspan="selectedEquipment ? 5 : 7" class="empty-cell">장비 데이터가 없습니다.</td>
+              </tr>
               <tr
-                v-for="(eq, idx) in filteredEquipments"
-                :key="eq.id"
-                class="table-row"
-                :class="{ selected: selectedEquipment?.id === eq.id }"
-                @click="selectEquipment(eq)"
+                v-for="(item, index) in items"
+                :key="item.equipmentId"
+                :class="{ selected: selectedEquipment && selectedEquipment.equipmentId === item.equipmentId }"
+                @click="selectEquipment(item)"
               >
-                <td class="col-no">{{ idx + 1 }}</td>
-                <td class="col-name">
-                  <span class="equipment-name">{{ eq.name }}</span>
+                <td>{{ (currentPage - 1) * 20 + index + 1 }}</td>
+                <td class="equipment-info-cell">
+                  <div class="equipment-name">{{ item.equipmentName }}</div>
+                  <div class="equipment-location">{{ item.intersectionName }}</div>
                 </td>
-                <td class="col-metrics">
-                  <div class="metric-line">모터 전류: <strong>{{ eq.motorCurrent }}A</strong></div>
-                  <div class="metric-line">베어링 진동: <strong>{{ eq.vibration }} m/s²</strong></div>
-                </td>
-                <td class="col-risk">
-                  <span
-                    class="risk-badge"
-                    :style="{
-                      color: RISK_CONFIG[eq.riskLevel].color,
-                      background: RISK_CONFIG[eq.riskLevel].bg
-                    }"
-                  >
-                    <span class="risk-dot" :style="{ background: RISK_CONFIG[eq.riskLevel].color }"></span>
-                    {{ RISK_CONFIG[eq.riskLevel].label }}
+                <template v-if="!selectedEquipment">
+                  <td>{{ item.motorCurrent != null ? item.motorCurrent.toFixed(2) : '-' }}</td>
+                  <td>{{ item.bearingVibration != null ? item.bearingVibration.toFixed(3) : '-' }}</td>
+                </template>
+                <td>
+                  <span class="risk-dot-wrap">
+                    <span
+                      class="risk-dot"
+                      :style="{ background: getRiskColor(item.riskLevel) }"
+                    ></span>
+                    <span :style="{ color: getRiskColor(item.riskLevel), fontWeight: 600 }">
+                      {{ getRiskLabel(item.riskLevel) }}
+                    </span>
                   </span>
                 </td>
-                <td class="col-rul">
-                  <span
-                    class="rul-text"
-                    :style="{ color: getRulColor(eq.rul) }"
-                  >{{ formatRul(eq.rul) }}</span>
+                <template v-if="!selectedEquipment">
+                  <td>{{ formatRul(item.rul) }}</td>
+                </template>
+                <td>
+                  <span class="status-badge" :style="getStatusStyle(item.status)">
+                    {{ item.status }}
+                  </span>
                 </td>
-                <td class="col-status">
-                  <span
-                    class="status-tag"
-                    :style="{
-                      color: STATUS_CONFIG[eq.status].color,
-                      background: STATUS_CONFIG[eq.status].bg,
-                      borderColor: STATUS_CONFIG[eq.status].color + '40'
-                    }"
-                  >{{ STATUS_CONFIG[eq.status].label }}</span>
-                </td>
-                <td class="col-date">{{ eq.lastInspection }}</td>
-              </tr>
-              <tr v-if="filteredEquipments.length === 0">
-                <td colspan="7" class="empty-row">조건에 맞는 설비가 없습니다.</td>
+                <td>{{ item.lastInspectionDate ?? '-' }}</td>
               </tr>
             </tbody>
           </table>
@@ -96,757 +117,687 @@
 
         <!-- 페이지네이션 -->
         <div class="pagination">
-          <button class="page-btn">&lt;</button>
-          <button class="page-btn active">1</button>
-          <button class="page-btn">&gt;</button>
+          <button :disabled="currentPage === 1" @click="changePage(currentPage - 1)">&lt;</button>
+          <button
+            v-for="p in pageNumbers"
+            :key="p"
+            :class="{ active: p === currentPage }"
+            @click="changePage(p)"
+          >{{ p }}</button>
+          <button :disabled="currentPage === totalPages" @click="changePage(currentPage + 1)">&gt;</button>
         </div>
       </div>
 
       <!-- 상세 패널 -->
-      <transition name="panel-slide">
-        <div v-if="selectedEquipment" class="detail-panel">
-          <!-- 패널 헤더 -->
-          <div class="panel-header">
-            <div class="panel-title-area">
-              <span class="panel-equipment-name">{{ selectedEquipment.name }}</span>
-              <span
-                class="status-tag"
-                :style="{
-                  color: STATUS_CONFIG[selectedEquipment.status].color,
-                  background: STATUS_CONFIG[selectedEquipment.status].bg,
-                  borderColor: STATUS_CONFIG[selectedEquipment.status].color + '40'
-                }"
-              >{{ STATUS_CONFIG[selectedEquipment.status].label }}</span>
-            </div>
-            <button class="close-btn" @click="closePanel">×</button>
+      <Transition name="slide-in">
+        <div class="detail-section" v-if="selectedEquipment">
+          <div class="detail-header">
+            <span class="detail-title">장비 상세 정보</span>
+            <button class="btn-close" @click="selectedEquipment = null">✕</button>
           </div>
 
-          <div class="panel-install-date">설치일: {{ selectedEquipment.installDate }}</div>
-
-          <!-- 메트릭 카드 4개 -->
-          <div class="metric-grid">
-            <div class="metric-card">
-              <div class="metric-label">모터 전류</div>
-              <div class="metric-value">{{ selectedEquipment.motorCurrent }} <span class="metric-unit">A</span></div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-label">베어링 진동</div>
-              <div class="metric-value">{{ selectedEquipment.vibration }} <span class="metric-unit">m/s²</span></div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-label">온도</div>
-              <div class="metric-value">{{ selectedEquipment.temperature }} <span class="metric-unit">°C</span></div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-label">위험도 스코어</div>
-              <div
-                class="metric-value"
-                :style="{ color: RISK_CONFIG[selectedEquipment.riskLevel].color }"
-              >{{ selectedEquipment.riskScore.toFixed(2) }}</div>
-            </div>
+          <!-- 위험도 강조 배너 -->
+          <div
+            class="risk-banner"
+            :style="{ background: getRiskBannerBg(selectedEquipment.riskLevel), borderColor: getRiskColor(selectedEquipment.riskLevel) }"
+          >
+            <span class="risk-banner-dot" :style="{ background: getRiskColor(selectedEquipment.riskLevel) }"></span>
+            <span class="risk-banner-label" :style="{ color: getRiskColor(selectedEquipment.riskLevel) }">
+              {{ getRiskLabel(selectedEquipment.riskLevel) }}
+            </span>
+            <span class="risk-banner-rul">잔여수명 {{ formatRul(selectedEquipment.rul) }}</span>
           </div>
 
-          <!-- RUL 예측 섹션 -->
-          <div class="rul-section">
-            <button
-              class="predict-btn"
-              :disabled="rulPredicting"
-              @click="predictRul"
-            >
-              <span class="predict-icon">⚡</span>
-              {{ rulPredicting ? 'AI 분석 중...' : 'AI 잔여수명 예측' }}
-            </button>
+          <!-- 상세 정보 테이블 -->
+          <table class="detail-table">
+            <tbody>
+              <tr>
+                <th>장비정보</th>
+                <td>{{ selectedEquipment.equipmentName }}</td>
+              </tr>
+              <tr>
+                <th>번호</th>
+                <td>{{ selectedEquipment.equipmentId }}</td>
+              </tr>
+              <tr>
+                <th>위치</th>
+                <td>{{ selectedEquipment.intersectionName ?? '-' }}</td>
+              </tr>
+              <tr>
+                <th>모터전류</th>
+                <td>{{ selectedEquipment.motorCurrent != null ? selectedEquipment.motorCurrent.toFixed(2) + ' A' : '-' }}</td>
+              </tr>
+              <tr>
+                <th>베어링진동</th>
+                <td>{{ selectedEquipment.bearingVibration != null ? selectedEquipment.bearingVibration.toFixed(3) + ' mm/s' : '-' }}</td>
+              </tr>
+              <tr>
+                <th>온도</th>
+                <td>{{ selectedEquipment.temperature != null ? selectedEquipment.temperature.toFixed(1) + ' °C' : '-' }}</td>
+              </tr>
+              <tr>
+                <th>위험도</th>
+                <td>
+                  <span class="risk-dot-wrap">
+                    <span class="risk-dot" :style="{ background: getRiskColor(selectedEquipment.riskLevel) }"></span>
+                    <span :style="{ color: getRiskColor(selectedEquipment.riskLevel), fontWeight: 600 }">
+                      {{ getRiskLabel(selectedEquipment.riskLevel) }}
+                    </span>
+                  </span>
+                </td>
+              </tr>
+              <tr>
+                <th>상태</th>
+                <td>
+                  <span class="status-badge" :style="getStatusStyle(selectedEquipment.status)">
+                    {{ selectedEquipment.status }}
+                  </span>
+                </td>
+              </tr>
+              <tr>
+                <th>잔여수명</th>
+                <td :style="{ color: getRiskColor(selectedEquipment.riskLevel), fontWeight: 600 }">
+                  {{ formatRul(selectedEquipment.rul) }}
+                </td>
+              </tr>
+              <tr>
+                <th>최근점검일</th>
+                <td>{{ selectedEquipment.lastInspectionDate ?? '-' }}</td>
+              </tr>
+            </tbody>
+          </table>
 
-            <transition name="fade">
-              <div v-if="rulResult" class="rul-result">
-                <span
-                  class="rul-grade-badge"
-                  :style="{
-                    color: RISK_CONFIG[rulResult.grade].color,
-                    background: RISK_CONFIG[rulResult.grade].bg,
-                    borderColor: RISK_CONFIG[rulResult.grade].color + '50'
-                  }"
-                >{{ rulResult.grade }}</span>
-                <span class="rul-days">잔여 수명 약 <strong>{{ rulResult.rul }}</strong>일</span>
-              </div>
-            </transition>
-          </div>
-
-          <!-- 모터전류 차트 -->
-          <div class="chart-section">
-            <div class="chart-title">모터전류 추이 (A)</div>
-            <div class="chart-card">
-              <canvas ref="chartMotorRef"></canvas>
-            </div>
-          </div>
-
-          <!-- 베어링진동 차트 -->
-          <div class="chart-section">
-            <div class="chart-title">베어링진동 추이 (m/s²)</div>
-            <div class="chart-card">
-              <canvas ref="chartVibrationRef"></canvas>
-            </div>
+          <!-- 액션 버튼 -->
+          <div class="detail-actions">
+            <button class="btn-record" @click="onRecordCheck">기록확인</button>
+            <button class="btn-alert" @click="onSendAlert">알림발송</button>
           </div>
         </div>
-      </transition>
+      </Transition>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, nextTick, watch, onBeforeUnmount } from 'vue'
-import Chart from 'chart.js/auto'
+import { ref, reactive, computed, onMounted } from 'vue'
+import api from '../api'
 
-// ── Mock 데이터 ──────────────────────────────────────────────
-const MOCK_EQUIPMENTS = [
-  { id: 1, name: 'CAM01', riskLevel: 'LOW',      rul: 312, status: 'OPERATIONAL', motorCurrent: 15.2, vibration: 1.2, temperature: 45, riskScore: 0.12, lastInspection: '2026.03.15', installDate: '2023.06.15' },
-  { id: 2, name: 'CAM02', riskLevel: 'LOW',      rul: 305, status: 'OPERATIONAL', motorCurrent: 14.8, vibration: 1.5, temperature: 43, riskScore: 0.15, lastInspection: '2026.03.14', installDate: '2023.07.20' },
-  { id: 3, name: 'CAM03', riskLevel: 'MEDIUM',   rul: 150, status: 'REQUESTED',   motorCurrent: 18.5, vibration: 3.2, temperature: 62, riskScore: 0.45, lastInspection: '2026.03.12', installDate: '2022.11.10' },
-  { id: 4, name: 'CAM04', riskLevel: 'MEDIUM',   rul: 120, status: 'IN_PROGRESS', motorCurrent: 19.1, vibration: 4.0, temperature: 68, riskScore: 0.52, lastInspection: '2026.03.10', installDate: '2022.08.05' },
-  { id: 5, name: 'CAM05', riskLevel: 'HIGH',     rul: 30,  status: 'REQUIRED',    motorCurrent: 24.5, vibration: 5.8, temperature: 78, riskScore: 0.74, lastInspection: '2026.03.08', installDate: '2021.12.20' },
-  { id: 6,  name: 'CAM06', riskLevel: 'CRITICAL', rul: 3,   status: 'REQUIRED',    motorCurrent: 32.1, vibration: 8.5, temperature: 95, riskScore: 0.93, lastInspection: '2026.03.05', installDate: '2021.03.15' },
-  { id: 7,  name: 'CAM07', riskLevel: 'LOW',      rul: 290, status: 'OPERATIONAL', motorCurrent: 14.5, vibration: 1.1, temperature: 44, riskScore: 0.10, lastInspection: '2026.03.20', installDate: '2023.09.01' },
-  { id: 8,  name: 'CAM08', riskLevel: 'LOW',      rul: 278, status: 'OPERATIONAL', motorCurrent: 15.0, vibration: 1.3, temperature: 46, riskScore: 0.13, lastInspection: '2026.03.19', installDate: '2023.10.15' },
-  { id: 9,  name: 'CAM09', riskLevel: 'MEDIUM',   rul: 135, status: 'REQUESTED',   motorCurrent: 17.9, vibration: 3.5, temperature: 64, riskScore: 0.48, lastInspection: '2026.03.11', installDate: '2022.09.22' },
-  { id: 10, name: 'CAM10', riskLevel: 'MEDIUM',   rul: 100, status: 'IN_PROGRESS', motorCurrent: 20.3, vibration: 4.2, temperature: 70, riskScore: 0.55, lastInspection: '2026.03.09', installDate: '2022.06.18' },
-  { id: 11, name: 'CAM11', riskLevel: 'HIGH',     rul: 25,  status: 'REQUIRED',    motorCurrent: 25.8, vibration: 6.1, temperature: 80, riskScore: 0.78, lastInspection: '2026.03.07', installDate: '2021.10.05' },
-  { id: 12, name: 'CAM12', riskLevel: 'CRITICAL', rul: 2,   status: 'REQUIRED',    motorCurrent: 33.4, vibration: 9.0, temperature: 98, riskScore: 0.96, lastInspection: '2026.03.04', installDate: '2020.12.10' },
-]
-
-// ── 색상 설정 ─────────────────────────────────────────────────
-const RISK_CONFIG = {
-  LOW:      { label: '정상', color: '#10B981', bg: 'rgba(16,185,129,0.15)' },
-  MEDIUM:   { label: '주의', color: '#FBBF24', bg: 'rgba(251,191,36,0.15)' },
-  HIGH:     { label: '경고', color: '#F59E0B', bg: 'rgba(245,158,11,0.15)' },
-  CRITICAL: { label: '위험', color: '#EF4444', bg: 'rgba(239,68,68,0.15)'  },
-}
-
-const STATUS_CONFIG = {
-  OPERATIONAL: { label: '정상가능', color: '#10B981', bg: 'rgba(16,185,129,0.15)' },
-  REQUESTED:   { label: '점검요청', color: '#FBBF24', bg: 'rgba(251,191,36,0.15)' },
-  IN_PROGRESS: { label: '점검중',   color: '#1A6DCC', bg: 'rgba(26,109,204,0.15)'  },
-  REQUIRED:    { label: '점검요망', color: '#EF4444', bg: 'rgba(239,68,68,0.15)'   },
-}
-
-// ── 상태 ─────────────────────────────────────────────────────
-const riskFilter   = ref('')
-const statusFilter = ref('')
+const items = ref([])
+const loading = ref(false)
 const selectedEquipment = ref(null)
-const rulPredicting = ref(false)
-const rulResult     = ref(null)
-const chartMotorRef     = ref(null)
-const chartVibrationRef = ref(null)
-let chartMotor     = null
-let chartVibration = null
+const currentPage = ref(1)
+const totalPages = ref(1)
 
-// ── computed ─────────────────────────────────────────────────
-const filteredEquipments = computed(() => {
-  return MOCK_EQUIPMENTS.filter(eq => {
-    const riskOk   = !riskFilter.value   || eq.riskLevel === riskFilter.value
-    const statusOk = !statusFilter.value || eq.status    === statusFilter.value
-    return riskOk && statusOk
-  })
+const filters = reactive({
+  equipment: '',
+  riskLevel: '',
+  status: ''
 })
 
-// ── 유틸 함수 ─────────────────────────────────────────────────
-function formatRul(rul) {
-  if (rul <= 3)   return '3일 이내'
-  if (rul <= 30)  return `약 ${rul}일`
-  if (rul <= 180) return `약 ${rul}일`
-  return '300일 이상'
+const riskColors = {
+  LOW: '#10B981',
+  MEDIUM: '#FB923C',
+  HIGH: '#F59E0B',
+  CRITICAL: '#EF4444'
 }
 
-function getRulColor(rul) {
-  if (rul <= 3)   return '#EF4444'
-  if (rul <= 30)  return '#F59E0B'
-  if (rul <= 180) return '#FBBF24'
-  return '#10B981'
+const riskLabels = {
+  LOW: '정상',
+  MEDIUM: '주의',
+  HIGH: '경고',
+  CRITICAL: '위험'
 }
 
-function generateTimeSeries(baseValue, points = 12) {
-  return Array.from({ length: points }, () => {
-    const noise = (Math.random() - 0.5) * 0.2 * baseValue
-    return parseFloat((baseValue + noise).toFixed(2))
-  })
+const statusColors = {
+  '정상가동': '#10B981',
+  '통신오류': '#3B82F6',
+  '점검중': '#F59E0B',
+  '점검요망': '#EF4444'
 }
 
-function getTimeLabels(points = 12) {
-  const labels = []
-  const now = new Date()
-  for (let i = points - 1; i >= 0; i--) {
-    const d = new Date(now.getTime() - i * 60 * 60 * 1000)
-    labels.push(d.getHours().toString().padStart(2, '0') + ':00')
-  }
-  return labels
+const getRiskColor = (riskLevel) => riskColors[riskLevel] ?? '#9CA3AF'
+const getRiskLabel = (riskLevel) => riskLabels[riskLevel] ?? '-'
+
+const getRiskBannerBg = (riskLevel) => {
+  const color = getRiskColor(riskLevel)
+  // 투명한 배너 배경색 (hex + 18 = 약 9% 투명도)
+  return color + '18'
 }
 
-// ── 차트 ─────────────────────────────────────────────────────
-function initCharts() {
-  if (!selectedEquipment.value) return
-  const eq = selectedEquipment.value
-  const labels = getTimeLabels(12)
-
-  // 모터전류 차트
-  if (chartMotorRef.value) {
-    chartMotor = new Chart(chartMotorRef.value, {
-      type: 'line',
-      data: {
-        labels,
-        datasets: [{
-          label: '모터 전류 (A)',
-          data: generateTimeSeries(eq.motorCurrent),
-          borderColor: '#1A6DCC',
-          backgroundColor: 'rgba(26,109,204,0.12)',
-          borderWidth: 2,
-          fill: true,
-          tension: 0.4,
-          pointRadius: 3,
-          pointBackgroundColor: '#1A6DCC',
-        }],
-      },
-      options: chartOptions('A'),
-    })
-  }
-
-  // 베어링진동 차트
-  if (chartVibrationRef.value) {
-    chartVibration = new Chart(chartVibrationRef.value, {
-      type: 'line',
-      data: {
-        labels,
-        datasets: [{
-          label: '베어링 진동 (m/s²)',
-          data: generateTimeSeries(eq.vibration),
-          borderColor: '#F59E0B',
-          backgroundColor: 'rgba(245,158,11,0.12)',
-          borderWidth: 2,
-          fill: true,
-          tension: 0.4,
-          pointRadius: 3,
-          pointBackgroundColor: '#F59E0B',
-        }],
-      },
-      options: chartOptions('m/s²'),
-    })
-  }
-}
-
-function chartOptions(unit) {
+const getStatusStyle = (status) => {
+  const color = statusColors[status] ?? '#9CA3AF'
   return {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: { display: false },
-      tooltip: {
-        backgroundColor: '#1E2140',
-        titleColor: '#9CA3AF',
-        bodyColor: '#F3F4F6',
-        callbacks: {
-          label: ctx => ` ${ctx.parsed.y} ${unit}`,
-        },
-      },
-    },
-    scales: {
-      x: {
-        ticks: { color: '#9CA3AF', font: { size: 11 } },
-        grid:  { color: 'rgba(255,255,255,0.06)' },
-      },
-      y: {
-        ticks: { color: '#9CA3AF', font: { size: 11 } },
-        grid:  { color: 'rgba(255,255,255,0.06)' },
-      },
-    },
+    background: color,
+    color: '#fff'
   }
 }
 
-function destroyCharts() {
-  chartMotor?.destroy()
-  chartMotor = null
-  chartVibration?.destroy()
-  chartVibration = null
+const formatRul = (rul) => {
+  if (rul == null) return '-'
+  if (rul > 300) return '300일 이상'
+  if (rul <= 3) return `${rul}일 이내`
+  return `약 ${rul}일`
 }
 
-// ── 메서드 ────────────────────────────────────────────────────
-function selectEquipment(eq) {
-  rulResult.value = null
-  rulPredicting.value = false
-  selectedEquipment.value = eq
-}
-
-function closePanel() {
-  destroyCharts()
-  selectedEquipment.value = null
-  rulResult.value = null
-  rulPredicting.value = false
-}
-
-function predictRul() {
-  if (rulPredicting.value || !selectedEquipment.value) return
-  rulPredicting.value = true
-  rulResult.value = null
-  setTimeout(() => {
-    rulPredicting.value = false
-    rulResult.value = {
-      grade: selectedEquipment.value.riskLevel,
-      rul:   selectedEquipment.value.rul,
-    }
-  }, 2000)
-}
-
-// ── watch ─────────────────────────────────────────────────────
-watch(selectedEquipment, async (eq) => {
-  destroyCharts()
-  if (eq) {
-    await nextTick()
-    initCharts()
-  }
+const pageNumbers = computed(() => {
+  const pages = []
+  const start = Math.max(1, currentPage.value - 2)
+  const end = Math.min(totalPages.value, currentPage.value + 2)
+  for (let i = start; i <= end; i++) pages.push(i)
+  return pages
 })
 
-onBeforeUnmount(() => destroyCharts())
+const fetchEquipments = async () => {
+  loading.value = true
+  try {
+    const params = {}
+    if (filters.equipment) params.equipment = filters.equipment
+    if (filters.riskLevel) params.riskLevel = filters.riskLevel
+    if (filters.status) params.status = filters.status
+    params.page = currentPage.value
+    params.size = 20
+
+    const { data } = await api.get('/predictive/equipments', { params })
+    if (data.success) {
+      items.value = data.data.equipments
+      totalPages.value = data.data.pagination.totalPages
+    }
+  } catch {
+    items.value = []
+  } finally {
+    loading.value = false
+  }
+}
+
+const search = () => {
+  currentPage.value = 1
+  selectedEquipment.value = null
+  fetchEquipments()
+}
+
+const reset = () => {
+  filters.equipment = ''
+  filters.riskLevel = ''
+  filters.status = ''
+  currentPage.value = 1
+  selectedEquipment.value = null
+  fetchEquipments()
+}
+
+const changePage = (p) => {
+  currentPage.value = p
+  fetchEquipments()
+}
+
+const selectEquipment = async (item) => {
+  try {
+    const { data } = await api.get(`/predictive/equipments/${item.equipmentId}`)
+    if (data.success) {
+      selectedEquipment.value = data.data
+    }
+  } catch {
+    selectedEquipment.value = item
+  }
+}
+
+const onRecordCheck = () => {
+  // 추후 구현
+}
+
+const onSendAlert = () => {
+  // 추후 구현
+}
+
+onMounted(() => {
+  fetchEquipments()
+})
 </script>
 
 <style scoped>
-/* ── 기본 ────────────────────────────────────────────────── */
-.page-container {
-  padding: 28px 32px;
+.predictive {
+  padding: 24px;
+  max-width: 1400px;
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
-  background: #F0F2F5;
+  background: #FFFFFF;
   min-height: 100%;
-  box-sizing: border-box;
 }
 
-/* ── 헤더 ────────────────────────────────────────────────── */
-.page-header {
+/* 섹션 헤더 */
+.section-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.page-title {
-  font-size: 22px;
+.section-title {
+  font-size: 16px;
   font-weight: 700;
   color: #1A1A2E;
   margin: 0;
 }
 
-.equipment-count {
-  background: rgba(26, 109, 204, 0.12);
-  color: #1A6DCC;
-  font-size: 13px;
+.btn-refresh {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  background: #1A6DCC;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 12px;
   font-weight: 600;
-  padding: 3px 10px;
-  border-radius: 20px;
-}
-
-.header-filters {
-  display: flex;
-  gap: 10px;
-}
-
-.filter-select {
-  padding: 8px 14px;
-  border: 1px solid rgba(26, 109, 204, 0.25);
-  border-radius: 8px;
-  background: #fff;
-  color: #374151;
-  font-size: 13px;
   cursor: pointer;
-  outline: none;
-  transition: border-color 0.2s;
-}
-.filter-select:hover,
-.filter-select:focus {
-  border-color: #1A6DCC;
+  transition: all 0.2s ease;
+  font-family: inherit;
 }
 
-/* ── 콘텐츠 레이아웃 ─────────────────────────────────────── */
-.content-area {
-  display: flex;
-  gap: 20px;
-  align-items: flex-start;
+.btn-refresh:hover {
+  background: #1457A8;
+  transform: translateY(-1px);
 }
 
-.table-section {
-  flex: 1;
-  min-width: 0;
-  transition: flex 0.3s ease;
-}
-
-.content-area.panel-open .table-section {
-  flex: 0 0 58%;
-}
-
-/* ── 테이블 카드 ──────────────────────────────────────────── */
-.table-card {
+/* 필터 패널 */
+.filter-panel {
   background: #fff;
   border-radius: 16px;
-  border: 1px solid rgba(0, 0, 0, 0.07);
-  overflow: hidden;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+  padding: 18px 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 4px 16px rgba(0, 0, 0, 0.10), 0 8px 24px rgba(0, 0, 0, 0.05);
+  margin-bottom: 18px;
+  border: 1px solid rgba(226, 232, 240, 0.6);
 }
 
-.equipment-table {
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.filter-item {
+  flex: 1;
+  min-width: 150px;
+}
+
+.filter-item select {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid #E2E8F0;
+  border-radius: 10px;
+  font-size: 13px;
+  color: #1A1A2E;
+  background: #fff;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+
+.filter-item select:focus {
+  border-color: #1A6DCC;
+  box-shadow: 0 0 0 3px rgba(26, 109, 204, 0.12);
+}
+
+.filter-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.btn-search {
+  padding: 10px 24px;
+  background: #1A6DCC;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+  letter-spacing: 0.3px;
+}
+
+.btn-search:hover {
+  background: #1457A8;
+  transform: translateY(-1px);
+}
+
+.btn-reset {
+  padding: 10px 18px;
+  background: #E5E7EB;
+  color: #4B5563;
+  border: none;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.btn-reset:hover {
+  background: #D1D5DB;
+}
+
+/* 콘텐츠 영역 */
+.content-area {
+  display: flex;
+  gap: 16px;
+}
+
+.list-section {
+  flex: 1;
+  min-width: 0;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 4px 16px rgba(0, 0, 0, 0.10), 0 8px 24px rgba(0, 0, 0, 0.05);
+  overflow: hidden;
+  border: 1px solid rgba(226, 232, 240, 0.6);
+}
+
+/* 테이블 */
+.table-wrap {
+  overflow-x: auto;
+}
+
+table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13.5px;
 }
 
-.equipment-table thead tr {
-  background: rgba(26, 109, 204, 0.06);
+thead tr {
+  background: #1A1A2E;
 }
 
-.equipment-table th {
+th {
   padding: 13px 16px;
   text-align: left;
+  font-size: 13px;
   font-weight: 600;
-  color: #6B7280;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.07);
-  white-space: nowrap;
+  color: #FFFFFF;
 }
 
-.table-row {
+td {
+  padding: 12px 16px;
+  font-size: 13px;
+  color: #1A1A2E;
+  border-bottom: 1px solid #F1F5FB;
+}
+
+tbody tr {
   cursor: pointer;
-  transition: background 0.15s;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  transition: background 0.15s ease;
 }
 
-.table-row:last-child {
-  border-bottom: none;
-}
-
-.table-row:hover {
+tbody tr:hover {
   background: rgba(26, 109, 204, 0.04);
 }
 
-.table-row.selected {
-  background: rgba(26, 109, 204, 0.10);
-  box-shadow: inset 3px 0 0 #1A6DCC;
+tbody tr.selected {
+  background: rgba(26, 109, 204, 0.08);
+  border-left: 3px solid #1A6DCC;
 }
 
-.equipment-table td {
-  padding: 14px 16px;
-  color: #374151;
-  vertical-align: middle;
-}
-
-.col-no {
-  color: #9CA3AF;
-  font-size: 13px;
-  width: 48px;
+.equipment-info-cell {
+  padding-top: 10px;
+  padding-bottom: 10px;
 }
 
 .equipment-name {
   font-weight: 600;
   color: #1A1A2E;
-  font-size: 14px;
+  font-size: 13px;
 }
 
-.metric-line {
-  font-size: 12.5px;
+.equipment-location {
+  font-size: 12px;
   color: #6B7280;
-  line-height: 1.8;
-}
-.metric-line strong {
-  color: #374151;
+  margin-top: 2px;
 }
 
-.risk-badge {
+.loading-cell,
+.empty-cell {
+  text-align: center;
+  color: #9CA3AF;
+  padding: 40px;
+}
+
+/* 위험도 */
+.risk-dot-wrap {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
-  border-radius: 20px;
-  font-size: 12.5px;
-  font-weight: 600;
+  gap: 6px;
 }
 
 .risk-dot {
-  width: 7px;
-  height: 7px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   flex-shrink: 0;
 }
 
-.rul-text {
-  font-weight: 700;
-  font-size: 13.5px;
-}
-
-.status-tag {
+/* 상태 배지 */
+.status-badge {
   display: inline-block;
   padding: 4px 10px;
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 12px;
   font-weight: 600;
-  border: 1px solid transparent;
+  white-space: nowrap;
 }
 
-.col-date {
-  color: #9CA3AF;
-  font-size: 13px;
-}
-
-.empty-row {
-  text-align: center;
-  padding: 48px 0;
-  color: #9CA3AF;
-  font-size: 14px;
-}
-
-/* ── 페이지네이션 ─────────────────────────────────────────── */
+/* 페이지네이션 */
 .pagination {
   display: flex;
   justify-content: center;
-  align-items: center;
-  gap: 6px;
-  margin-top: 20px;
+  gap: 4px;
+  padding: 14px;
 }
 
-.page-btn {
-  width: 34px;
-  height: 34px;
-  border: 1px solid rgba(0, 0, 0, 0.12);
-  border-radius: 8px;
+.pagination button {
+  width: 32px;
+  height: 32px;
+  border: 1px solid #E2E8F0;
   background: #fff;
-  color: #374151;
+  color: #4B5563;
+  border-radius: 8px;
   font-size: 13px;
   cursor: pointer;
-  transition: all 0.15s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  transition: all 0.15s ease;
+  font-family: inherit;
 }
-.page-btn:hover {
+
+.pagination button:hover:not(:disabled) {
+  background: rgba(26, 109, 204, 0.04);
   border-color: #1A6DCC;
   color: #1A6DCC;
 }
-.page-btn.active {
+
+.pagination button.active {
   background: #1A6DCC;
   color: #fff;
   border-color: #1A6DCC;
-  font-weight: 700;
 }
 
-/* ── 상세 패널 ────────────────────────────────────────────── */
-.detail-panel {
-  flex: 0 0 40%;
-  background: #1A1A2E;
-  border-radius: 16px;
-  padding: 24px;
-  color: #E5E7EB;
-  overflow-y: auto;
-  max-height: calc(100vh - 180px);
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.18);
-  box-sizing: border-box;
-}
-
-/* 패널 슬라이드 트랜지션 */
-.panel-slide-enter-active,
-.panel-slide-leave-active {
-  transition: transform 0.3s ease, opacity 0.3s ease;
-}
-.panel-slide-enter-from {
-  transform: translateX(30px);
-  opacity: 0;
-}
-.panel-slide-leave-to {
-  transform: translateX(30px);
-  opacity: 0;
-}
-
-/* fade 트랜지션 */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.3s ease;
-}
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-
-/* ── 패널 내부 ────────────────────────────────────────────── */
-.panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 6px;
-}
-
-.panel-title-area {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.panel-equipment-name {
-  font-size: 20px;
-  font-weight: 700;
-  color: #F9FAFB;
-}
-
-.close-btn {
-  width: 32px;
-  height: 32px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
-  color: #9CA3AF;
-  font-size: 18px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s;
-  line-height: 1;
-}
-.close-btn:hover {
-  background: rgba(239, 68, 68, 0.15);
-  color: #EF4444;
-  border-color: #EF4444;
-}
-
-.panel-install-date {
-  font-size: 12.5px;
-  color: #6B7280;
-  margin-bottom: 20px;
-}
-
-/* ── 메트릭 카드 그리드 ───────────────────────────────────── */
-.metric-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin-bottom: 24px;
-}
-
-.metric-card {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  padding: 14px 16px;
-}
-
-.metric-label {
-  font-size: 11.5px;
-  color: #9CA3AF;
-  margin-bottom: 6px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.metric-value {
-  font-size: 22px;
-  font-weight: 700;
-  color: #F9FAFB;
-  line-height: 1;
-}
-
-.metric-unit {
-  font-size: 13px;
-  font-weight: 400;
-  color: #9CA3AF;
-}
-
-/* ── RUL 예측 섹션 ────────────────────────────────────────── */
-.rul-section {
-  margin-bottom: 24px;
-}
-
-.predict-btn {
-  width: 100%;
-  padding: 12px;
-  background: linear-gradient(135deg, #1A6DCC, #0F4E9E);
-  color: #fff;
-  border: none;
-  border-radius: 10px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  transition: all 0.2s;
-  letter-spacing: 0.02em;
-}
-.predict-btn:hover:not(:disabled) {
-  background: linear-gradient(135deg, #2278DC, #1A6DCC);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 16px rgba(26, 109, 204, 0.35);
-}
-.predict-btn:disabled {
-  opacity: 0.7;
+.pagination button:disabled {
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
-.predict-icon {
-  font-size: 16px;
+/* 상세 패널 */
+.detail-section {
+  width: 360px;
+  flex-shrink: 0;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 4px 16px rgba(0, 0, 0, 0.10), 0 8px 24px rgba(0, 0, 0, 0.05);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-self: flex-start;
+  border: 1px solid rgba(226, 232, 240, 0.6);
 }
 
-.rul-result {
+.detail-header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-top: 14px;
-  padding: 14px 16px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 10px;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #E2E8F0;
 }
 
-.rul-grade-badge {
-  padding: 4px 12px;
-  border-radius: 6px;
-  font-size: 12px;
+.detail-title {
+  font-size: 15px;
   font-weight: 700;
-  border: 1px solid transparent;
-  letter-spacing: 0.06em;
+  color: #1A1A2E;
 }
 
-.rul-days {
-  font-size: 14px;
-  color: #D1D5DB;
-}
-.rul-days strong {
-  color: #F9FAFB;
-  font-weight: 700;
-}
-
-/* ── 차트 섹션 ────────────────────────────────────────────── */
-.chart-section {
-  margin-bottom: 20px;
-}
-
-.chart-title {
-  font-size: 12.5px;
-  font-weight: 600;
-  color: #9CA3AF;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: 10px;
+.btn-close {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: #F1F5FB;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 13px;
+  color: #6B7280;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s ease;
 }
 
-.chart-card {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+.btn-close:hover {
+  background: #E2E8F0;
+}
+
+/* 위험도 배너 */
+.risk-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
   border-radius: 12px;
-  padding: 16px;
-  height: 160px;
-  position: relative;
+  border: 1px solid;
 }
 
-.chart-card canvas {
-  width: 100% !important;
-  height: 100% !important;
+.risk-banner-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.risk-banner-label {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.risk-banner-rul {
+  margin-left: auto;
+  font-size: 13px;
+  color: #6B7280;
+  font-weight: 500;
+}
+
+/* 상세 테이블 */
+.detail-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.detail-table th {
+  width: 80px;
+  padding: 9px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #6B7280;
+  text-align: left;
+  border-bottom: 1px solid #F1F5FB;
+  white-space: nowrap;
+}
+
+.detail-table td {
+  padding: 9px 10px;
+  font-size: 13px;
+  color: #1A1A2E;
+  border-bottom: 1px solid #F1F5FB;
+}
+
+/* 액션 버튼 */
+.detail-actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.btn-record {
+  flex: 1;
+  padding: 11px;
+  background: #1A6DCC;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.btn-record:hover {
+  background: #1457A8;
+  transform: translateY(-1px);
+}
+
+.btn-alert {
+  flex: 1;
+  padding: 11px;
+  background: #EF4444;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.btn-alert:hover {
+  background: #DC2626;
+  transform: translateY(-1px);
+}
+
+/* 슬라이드 트랜지션 */
+.slide-in-enter-active {
+  transition: all 0.25s ease;
+}
+
+.slide-in-leave-active {
+  transition: all 0.2s ease;
+}
+
+.slide-in-enter-from {
+  opacity: 0;
+  transform: translateX(20px);
+}
+
+.slide-in-leave-to {
+  opacity: 0;
+  transform: translateX(20px);
+}
+
+@media (max-width: 900px) {
+  .content-area {
+    flex-direction: column;
+  }
+  .detail-section {
+    width: 100%;
+  }
 }
 </style>

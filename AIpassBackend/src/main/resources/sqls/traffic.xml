@@ -10,11 +10,7 @@
             i.intersection_id,
             i.name,
             CAST(i.latitude  AS DOUBLE PRECISION) AS latitude,
-            CAST(i.longitude AS DOUBLE PRECISION) AS longitude,
-            COALESCE(i.status, 'NORMAL')           AS status,
-            COALESCE(i.green_time,  40)            AS green_time,
-            COALESCE(i.yellow_time,  5)            AS yellow_time,
-            COALESCE(i.red_time,    35)            AS red_time
+            CAST(i.longitude AS DOUBLE PRECISION) AS longitude
         FROM intersection i
         ORDER BY i.intersection_id
     </select>
@@ -25,23 +21,10 @@
             i.intersection_id,
             i.name,
             CAST(i.latitude  AS DOUBLE PRECISION) AS latitude,
-            CAST(i.longitude AS DOUBLE PRECISION) AS longitude,
-            COALESCE(i.status, 'NORMAL')           AS status,
-            COALESCE(i.green_time,  40)            AS green_time,
-            COALESCE(i.yellow_time,  5)            AS yellow_time,
-            COALESCE(i.red_time,    35)            AS red_time
+            CAST(i.longitude AS DOUBLE PRECISION) AS longitude
         FROM intersection i
         WHERE i.intersection_id = #{id}
     </select>
-
-    <!-- 신호 시간 업데이트 -->
-    <update id="updateSignal">
-        UPDATE intersection
-        SET green_time  = #{green},
-            yellow_time = #{yellow},
-            red_time    = #{red}
-        WHERE intersection_id = #{id}
-    </update>
 
     <!--
         시간대별 교통 흐름 집계 (traffic_flow_log 전체 기준)
@@ -69,15 +52,7 @@
     <!-- 교차로 상태 요약 집계 -->
     <select id="findSummary" resultType="map">
         SELECT
-            COUNT(*)                                                          AS total_intersections,
-            COUNT(*) FILTER (WHERE COALESCE(i.status, 'NORMAL') = 'NORMAL')     AS normal_count,
-            COUNT(*) FILTER (WHERE COALESCE(i.status, 'NORMAL') = 'CAUTION')    AS caution_count,
-            COUNT(*) FILTER (WHERE COALESCE(i.status, 'NORMAL') = 'EMERGENCY')  AS emergency_count,
-            ROUND(AVG(
-                COALESCE(i.green_time, 40) +
-                COALESCE(i.yellow_time, 5) +
-                COALESCE(i.red_time, 35)
-            ))                                                                AS avg_cycle_time
+            COUNT(*) AS total_intersections
         FROM intersection i
     </select>
 

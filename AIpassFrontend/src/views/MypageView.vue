@@ -41,174 +41,163 @@
       </div>
 
       <!-- 오른쪽: 회원정보 수정 (수정 모드에서만 표시) -->
-      <div v-if="editMode" class="card edit-card">
-        <div class="card-header-center">
-          <h2 class="card-title">회원정보 수정</h2>
-        </div>
+      <div v-if="editMode" class="card edit-card" :class="{ shake: pwShaking }">
 
-        <div class="profile-body">
-          <div class="info-row">
-            <span class="info-label">아이디</span>
-            <span class="info-value readonly">{{ profile.username }}</span>
+        <!-- 프로필 편집 모드 -->
+        <template v-if="!pwChangeMode">
+          <div class="card-header-center">
+            <h2 class="card-title">회원정보 수정</h2>
           </div>
-          <div class="info-row">
-            <span class="info-label">이름</span>
-            <span class="info-value readonly">{{ profile.name }}</span>
-          </div>
-          <div class="info-row">
-            <span class="info-label">이메일</span>
-            <div class="email-input-wrap">
-              <div class="email-field">
-                <input
-                  ref="emailLocalRef"
-                  v-model="emailLocal"
-                  type="text"
-                  placeholder="이메일"
-                  @input="onEmailInput"
-                  @focus="showDomainDropdown = true"
-                />
-                <span class="at-sign">@</span>
-                <div class="domain-select-wrap">
+
+          <div class="profile-body">
+            <div class="info-row">
+              <span class="info-label">아이디</span>
+              <span class="info-value readonly">{{ profile.username }}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">이름</span>
+              <span class="info-value readonly">{{ profile.name }}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">이메일</span>
+              <div class="email-input-wrap">
+                <div class="email-field">
                   <input
-                    v-model="emailDomain"
+                    ref="emailLocalRef"
+                    v-model="emailLocal"
                     type="text"
-                    placeholder="직접입력"
-                    :readonly="emailDomainSelected !== '직접입력'"
+                    placeholder="이메일"
+                    @input="onEmailInput"
                     @focus="showDomainDropdown = true"
                   />
+                  <span class="at-sign">@</span>
+                  <div class="domain-select-wrap">
+                    <input
+                      v-model="emailDomain"
+                      type="text"
+                      placeholder="직접입력"
+                      :readonly="emailDomainSelected !== '직접입력'"
+                      @focus="showDomainDropdown = true"
+                    />
+                    <button
+                      class="domain-toggle"
+                      type="button"
+                      @click="showDomainDropdown = !showDomainDropdown"
+                    >&#9662;</button>
+                    <ul v-if="showDomainDropdown" class="domain-dropdown">
+                      <li
+                        v-for="d in domainOptions"
+                        :key="d"
+                        :class="{ active: emailDomainSelected === d }"
+                        @mousedown.prevent="selectDomain(d)"
+                      >{{ d }}</li>
+                    </ul>
+                  </div>
                   <button
-                    class="domain-toggle"
+                    v-if="emailLocal || emailDomain"
+                    class="btn-clear-email"
                     type="button"
-                    @click="showDomainDropdown = !showDomainDropdown"
-                  >&#9662;</button>
-                  <ul v-if="showDomainDropdown" class="domain-dropdown">
-                    <li
-                      v-for="d in domainOptions"
-                      :key="d"
-                      :class="{ active: emailDomainSelected === d }"
-                      @mousedown.prevent="selectDomain(d)"
-                    >{{ d }}</li>
-                  </ul>
+                    @click="clearEmail"
+                  >&times;</button>
                 </div>
+              </div>
+              <button
+                v-if="!emailCodeSent || emailVerified"
+                class="btn-verify-send btn-verify-inline"
+                :class="{ 'btn-verified': emailVerified }"
+                :disabled="emailSending || emailVerified"
+                @click="sendEmailCode"
+              >{{ emailVerified ? '인증완료' : emailSending ? '전송 중...' : '인증요청' }}</button>
+            </div>
+            <!-- 이메일 인증 pill (인증 요청 후 ~ 인증 완료 전) -->
+            <div v-if="emailCodeSent && !emailVerified" class="info-row verify-row">
+              <span class="info-label">이메일 인증</span>
+              <div class="email-verify-wrap">
+                <input
+                  v-model="emailVerifyCode"
+                  type="text"
+                  class="verify-code-input"
+                  placeholder="인증코드 6자리"
+                  maxlength="6"
+                />
                 <button
-                  v-if="emailLocal || emailDomain"
-                  class="btn-clear-email"
-                  type="button"
-                  @click="clearEmail"
-                >&times;</button>
+                  class="btn-verify-check"
+                  :disabled="emailVerifying"
+                  @click="checkEmailCode"
+                >{{ emailVerifying ? '확인 중...' : '확인' }}</button>
+                <button
+                  class="btn-verify-resend"
+                  :disabled="emailSending"
+                  @click="sendEmailCode"
+                >재전송</button>
               </div>
             </div>
-            <button
-              v-if="!emailCodeSent || emailVerified"
-              class="btn-verify-send btn-verify-inline"
-              :class="{ 'btn-verified': emailVerified }"
-              :disabled="emailSending || emailVerified"
-              @click="sendEmailCode"
-            >{{ emailVerified ? '인증완료' : emailSending ? '전송 중...' : '인증요청' }}</button>
+            <p v-if="emailVerifyError" class="field-error verify-error-msg">{{ emailVerifyError }}</p>
+            <div class="info-row last">
+              <span class="info-label">가입일</span>
+              <span class="info-value readonly">{{ formatDate(profile.createdAt) }}</span>
+            </div>
+
+            <p v-if="profileError" class="msg error">{{ profileError }}</p>
+            <p v-if="profileSuccess" class="msg success">{{ profileSuccess }}</p>
           </div>
-          <!-- 이메일 인증 pill (인증 요청 후 ~ 인증 완료 전) -->
-          <div v-if="emailCodeSent && !emailVerified" class="info-row verify-row">
-            <span class="info-label">이메일 인증</span>
-            <div class="email-verify-wrap">
+
+          <div class="card-footer">
+            <button class="btn-outline-pill" @click="enterPwMode">비밀번호 변경</button>
+            <button class="btn-primary-pill" :disabled="profileLoading || !emailVerified" @click="saveProfile">
+              {{ profileLoading ? '저장 중...' : '저 장' }}
+            </button>
+          </div>
+        </template>
+
+        <!-- 비밀번호 변경 모드 -->
+        <template v-else>
+          <div class="card-header-center">
+            <h2 class="card-title">비밀번호 변경</h2>
+          </div>
+
+          <button class="btn-back-link" type="button" @click="exitPwMode">마이페이지로 돌아가기</button>
+
+          <div class="profile-body">
+            <div class="info-row">
+              <span class="info-label">새 비밀번호</span>
               <input
-                v-model="emailVerifyCode"
-                type="text"
-                class="verify-code-input"
-                placeholder="인증코드 6자리"
-                maxlength="6"
+                v-model="pwForm.newPassword"
+                type="password"
+                class="pill-input"
+                placeholder="입력"
+                autocomplete="new-password"
+                @input="pwError = ''"
               />
-              <button
-                class="btn-verify-check"
-                :disabled="emailVerifying"
-                @click="checkEmailCode"
-              >{{ emailVerifying ? '확인 중...' : '확인' }}</button>
-              <button
-                class="btn-verify-resend"
-                :disabled="emailSending"
-                @click="sendEmailCode"
-              >재전송</button>
             </div>
-          </div>
-          <p v-if="emailVerifyError" class="field-error verify-error-msg">{{ emailVerifyError }}</p>
-          <div class="info-row last">
-            <span class="info-label">가입일</span>
-            <span class="info-value readonly">{{ formatDate(profile.createdAt) }}</span>
-          </div>
 
-          <p v-if="profileError" class="msg error">{{ profileError }}</p>
-          <p v-if="profileSuccess" class="msg success">{{ profileSuccess }}</p>
-        </div>
-
-        <div class="card-footer">
-          <button class="btn-outline-pill" @click="openPwModal">비밀번호 변경</button>
-          <button class="btn-primary-pill" :disabled="profileLoading || !emailVerified" @click="saveProfile">
-            {{ profileLoading ? '저장 중...' : '저 장' }}
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 비밀번호 변경 모달 -->
-    <div v-if="showPwModal" class="modal-overlay" @click.self="closePwModal">
-      <div class="modal" :class="{ shake: pwShaking }">
-        <div class="modal-header">
-          <h2 class="modal-title">비밀번호 변경</h2>
-          <button class="btn-modal-close" @click="closePwModal">&times;</button>
-        </div>
-
-        <form @submit.prevent="handleChangePassword" class="pw-form" novalidate>
-          <div class="form-group">
-            <label for="currentPw">현재 비밀번호</label>
-            <input
-              id="currentPw"
-              v-model="pwForm.currentPassword"
-              type="password"
-              placeholder="현재 비밀번호를 입력하세요"
-              autocomplete="current-password"
-              @input="pwError = ''"
-            />
-          </div>
-
-          <div class="form-group">
-            <label for="newPw">새 비밀번호</label>
-            <input
-              id="newPw"
-              v-model="pwForm.newPassword"
-              type="password"
-              placeholder="새 비밀번호 (8자 이상)"
-              autocomplete="new-password"
-              @input="pwError = ''"
-            />
-            <div class="pw-rules">
-              <span :class="{ pass: pwRules.length }">8자 이상</span>
-              <span :class="{ pass: pwRules.upper }">대문자</span>
-              <span :class="{ pass: pwRules.lower }">소문자</span>
-              <span :class="{ pass: pwRules.number }">숫자</span>
-              <span :class="{ pass: pwRules.special }">특수문자</span>
+            <div class="info-row">
+              <span class="info-label">새 비밀번호 확인</span>
+              <input
+                v-model="pwForm.confirmPassword"
+                type="password"
+                class="pill-input"
+                placeholder="입력"
+                autocomplete="new-password"
+                @input="pwError = ''"
+              />
             </div>
+            <p v-if="pwForm.confirmPassword && !pwMatch" class="field-error confirm-msg">비밀번호가 일치하지 않습니다.</p>
+            <p v-if="pwForm.confirmPassword && pwMatch" class="field-ok confirm-msg">비밀번호가 일치합니다.</p>
+
+            <p v-if="pwError" class="msg error">{{ pwError }}</p>
+            <p v-if="pwSuccess" class="msg success">{{ pwSuccess }}</p>
+
+            <p class="pw-hint">* 영문 대/소문자, 숫자, 특수문자를 포함한 8~16자</p>
           </div>
 
-          <div class="form-group">
-            <label for="confirmPw">새 비밀번호 확인</label>
-            <input
-              id="confirmPw"
-              v-model="pwForm.confirmPassword"
-              type="password"
-              placeholder="새 비밀번호를 다시 입력하세요"
-              autocomplete="new-password"
-              @input="pwError = ''"
-            />
-            <p v-if="pwForm.confirmPassword && !pwMatch" class="field-error">비밀번호가 일치하지 않습니다.</p>
-            <p v-if="pwForm.confirmPassword && pwMatch" class="field-ok">비밀번호가 일치합니다.</p>
+          <div class="card-footer">
+            <button class="btn-primary-pill" :disabled="pwLoading" @click="handleChangePassword">
+              {{ pwLoading ? '변경 중...' : '저 장' }}
+            </button>
           </div>
+        </template>
 
-          <p v-if="pwError" class="msg error">{{ pwError }}</p>
-          <p v-if="pwSuccess" class="msg success">{{ pwSuccess }}</p>
-
-          <button type="submit" class="btn-submit" :disabled="pwLoading">
-            {{ pwLoading ? '변경 중...' : '저장' }}
-          </button>
-        </form>
       </div>
     </div>
   </div>
@@ -252,8 +241,8 @@ const emailSending = ref(false)
 const emailVerifying = ref(false)
 
 // 비밀번호
-const showPwModal = ref(false)
-const pwForm = reactive({ currentPassword: '', newPassword: '', confirmPassword: '' })
+const pwChangeMode = ref(false)
+const pwForm = reactive({ newPassword: '', confirmPassword: '' })
 const pwLoading = ref(false)
 const pwError = ref('')
 const pwSuccess = ref('')
@@ -273,6 +262,10 @@ const pwRules = computed(() => {
 const pwMatch = computed(() => {
   return pwForm.newPassword && pwForm.newPassword === pwForm.confirmPassword
 })
+
+const allPwRulesPass = computed(() =>
+  Object.values(pwRules.value).every(Boolean)
+)
 
 const formatDate = (dateStr) => {
   if (!dateStr) return '-'
@@ -421,30 +414,28 @@ const saveProfile = async () => {
   }
 }
 
-const openPwModal = () => {
-  pwForm.currentPassword = ''
+const enterPwMode = () => {
   pwForm.newPassword = ''
   pwForm.confirmPassword = ''
   pwError.value = ''
   pwSuccess.value = ''
-  showPwModal.value = true
+  pwChangeMode.value = true
 }
 
-const closePwModal = () => {
-  showPwModal.value = false
+const exitPwMode = () => {
+  pwForm.newPassword = ''
+  pwForm.confirmPassword = ''
+  pwError.value = ''
+  pwSuccess.value = ''
+  pwChangeMode.value = false
 }
 
 const handleChangePassword = async () => {
   pwError.value = ''
   pwSuccess.value = ''
 
-  if (!pwForm.currentPassword) {
-    pwError.value = '현재 비밀번호를 입력하세요.'
-    triggerShake(pwShaking)
-    return
-  }
-  if (!pwRules.value.length) {
-    pwError.value = '새 비밀번호는 8자 이상이어야 합니다.'
+  if (!allPwRulesPass.value) {
+    pwError.value = '새 비밀번호는 8자 이상, 대문자/소문자/숫자/특수문자를 모두 포함해야 합니다.'
     triggerShake(pwShaking)
     return
   }
@@ -457,16 +448,14 @@ const handleChangePassword = async () => {
   pwLoading.value = true
   try {
     await api.post('/member/change-password', {
-      currentPassword: pwForm.currentPassword,
       newPassword: pwForm.newPassword
     })
     pwSuccess.value = '비밀번호가 변경되었습니다.'
-    pwForm.currentPassword = ''
     pwForm.newPassword = ''
     pwForm.confirmPassword = ''
     setTimeout(() => {
       pwSuccess.value = ''
-      closePwModal()
+      exitPwMode()
     }, 1500)
   } catch (err) {
     pwError.value = err.response?.data?.message || '비밀번호 변경에 실패했습니다.'
@@ -928,123 +917,53 @@ onMounted(async () => {
   color: #10B981;
 }
 
-/* ══════════════════════════════════
-   비밀번호 변경 모달
-   ══════════════════════════════════ */
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.40);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.modal {
-  background: #fff;
-  border-radius: 20px;
-  padding: 32px 36px;
-  width: 400px;
-  max-width: 90vw;
-  box-shadow: 0 8px 36px rgba(0, 0, 0, 0.18);
-}
-
-.modal.shake {
-  animation: shake 0.45s ease-in-out;
-}
-
-.modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 24px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid #e8ecf1;
-}
-
-.modal-title {
-  font-size: 17px;
-  font-weight: 700;
-  color: #1F3864;
-  margin: 0;
-}
-
-.btn-modal-close {
+/* ── 비밀번호 폼 ── */
+/* ── 비밀번호 변경 폼 ── */
+.btn-back-link {
+  display: block;
   background: none;
   border: none;
-  font-size: 22px;
-  color: #aab5c4;
-  cursor: pointer;
-  padding: 0;
-  line-height: 1;
-}
-
-.btn-modal-close:hover {
-  color: #333;
-}
-
-/* ── 비밀번호 폼 ── */
-.pw-form {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.form-group label {
+  color: #1A6DCC;
   font-size: 13px;
   font-weight: 600;
-  color: #1F3864;
+  cursor: pointer;
+  text-align: center;
+  margin: -20px auto 16px;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
-.form-group input {
-  padding: 10px 14px;
-  border: 1px solid #d0dae6;
-  border-radius: 8px;
-  font-size: 14px;
-  color: #1a1a1a;
-  background: #f5f8fb;
+.btn-back-link:hover {
+  color: #1457A8;
+}
+
+.pill-input {
+  flex: 1;
+  background: transparent;
+  border: none;
   outline: none;
-  transition: border-color 0.2s;
+  font-size: 14px;
+  font-weight: 700;
+  color: #1a1a1a;
+  padding: 10px 16px;
+  min-width: 0;
 }
 
-.form-group input::placeholder {
+.pill-input::placeholder {
   color: #b0bcc9;
+  font-weight: 400;
 }
 
-.form-group input:focus {
-  border-color: #5ba3e6;
-  background: #fff;
-}
-
-.pw-rules {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-top: 4px;
-}
-
-.pw-rules span {
+.pw-hint {
   font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 10px;
-  background: #f0f0f0;
-  color: #999;
-  transition: all 0.2s;
+  color: #6B7280;
+  margin: -4px 0 4px 44px;
 }
 
-.pw-rules span.pass {
-  background: #d1fae5;
-  color: #059669;
+.confirm-msg {
+  text-align: center;
+  margin: -4px 0 4px 0;
 }
 
 .field-error {
@@ -1059,26 +978,6 @@ onMounted(async () => {
   margin: 0;
 }
 
-.btn-submit {
-  padding: 12px;
-  background: linear-gradient(135deg, #5ba3e6 0%, #3a7fcc 100%);
-  color: #fff;
-  border: none;
-  border-radius: 10px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: opacity 0.2s;
-}
-
-.btn-submit:hover:not(:disabled) {
-  opacity: 0.9;
-}
-
-.btn-submit:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
 
 /* ── 반응형 ── */
 @media (max-width: 768px) {

@@ -65,20 +65,22 @@ public class MemberController {
                     .body(Map.of("message", "로그인이 필요합니다."));
         }
 
-        String currentPassword = request.get("currentPassword");
         String newPassword = request.get("newPassword");
 
-        if (currentPassword == null || currentPassword.isBlank()) {
-            return ResponseEntity.badRequest().body(Map.of("message", "현재 비밀번호를 입력하세요."));
-        }
         if (newPassword == null || newPassword.length() < 8) {
             return ResponseEntity.badRequest().body(Map.of("message", "새 비밀번호는 8자 이상이어야 합니다."));
         }
-
-        MemberDTO fresh = memberService.findByLoginId(member.getLoginId());
-        if (!memberService.checkPassword(currentPassword, fresh.getPassword())) {
-            return ResponseEntity.status(400)
-                    .body(Map.of("message", "현재 비밀번호가 일치하지 않습니다."));
+        if (!newPassword.matches(".*[A-Z].*")) {
+            return ResponseEntity.badRequest().body(Map.of("message", "새 비밀번호에 대문자를 포함해야 합니다."));
+        }
+        if (!newPassword.matches(".*[a-z].*")) {
+            return ResponseEntity.badRequest().body(Map.of("message", "새 비밀번호에 소문자를 포함해야 합니다."));
+        }
+        if (!newPassword.matches(".*[0-9].*")) {
+            return ResponseEntity.badRequest().body(Map.of("message", "새 비밀번호에 숫자를 포함해야 합니다."));
+        }
+        if (!newPassword.matches(".*[!@#$%^&*()_+\\-=\\[\\]{};':\"\\\\|,.<>/?].*")) {
+            return ResponseEntity.badRequest().body(Map.of("message", "새 비밀번호에 특수문자를 포함해야 합니다."));
         }
 
         memberService.changePassword(member.getLoginId(), newPassword);
