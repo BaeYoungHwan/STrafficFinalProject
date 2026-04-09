@@ -155,7 +155,7 @@ public class EnforcementController {
             case "SPEEDING":      return "과속";
             case "RED_LIGHT":     return "신호위반";
             case "CENTER_LINE":   return "중앙선 침범";
-            case "LINE_CROSSING": return "차선 위반";
+            case "LINE_CROSSING": return "실선 침범";
             default:              return raw;
         }
     }

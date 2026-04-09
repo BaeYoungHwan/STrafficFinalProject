@@ -142,7 +142,7 @@ def _correct_ocr_text(text: str) -> list[str]:
 _CONFUSABLE_HANGUL: dict[str, list[str]] = {
     "어": ["허", "서", "저"],
     "허": ["어", "서"],
-    "오": ["호", "소"],
+    "오": ["호", "소", "어"],    # 어→오 오인식 교정 추가
     "호": ["오", "소"],
     "아": ["하", "사"],
     "하": ["아"],
@@ -161,7 +161,7 @@ _CONFUSABLE_HANGUL: dict[str, list[str]] = {
     "저": ["자", "어"],
     "자": ["저"],
     "거": ["가"],
-    "가": ["거"],
+    "가": ["거", "나", "라", "마"],  # 라→가 오인식 교정 추가 (저화질 획 유사)
     "도": ["로", "고", "소"],
     "로": ["도", "고"],
     "고": ["도", "로", "호"],
@@ -268,9 +268,9 @@ ocr_model = PaddleOCR(
     use_doc_orientation_classify=False,
     use_doc_unwarping=False,
     cpu_threads=2,          # OCR 전용 코어 2개로 제한 → YOLO/MJPEG 코어 경쟁 방지
-    det_db_thresh=0.2,      # 기본 0.3 → 희미한 문자도 감지
+    det_db_thresh=0.15,     # 기본 0.3 → 0.15로 완화: 희미/모션블러 문자 감지율 향상
     det_db_box_thresh=0.4,  # 기본 0.5 → 작은 문자 bbox 생존
-    rec_batch_num=6,        # 번호판 최대 6문자 일괄 처리
+    rec_batch_num=7,        # 번호판 최대 7문자 일괄 처리 (지역 번호판 대응)
 )
 
 
@@ -644,6 +644,51 @@ async def extract_license_plate(frame: np.ndarray) -> str:
         except Exception as e:
             logger.error(f"[OCR] Exception during extraction: {e}")
             return "UNRECOGNIZED"
+
+
+async def extract_license_plate_ensemble(frame: np.ndarray, runs: int = 3) -> str:
+    """앙상블 OCR: 동일 이미지를 runs회 인식 후 다수결로 최종 번호판 결정.
+
+    - 2/3 이상 일치 → 해당 결과 반환 (다수결 채택)
+    - 전원 불일치 → needs_review=True 강제 (버그 3·4 핵심 방어)
+    - MANUAL_REVIEW_REQUIRED 결과도 다수결 대상에 포함
+    """
+    results = []
+    for _ in range(runs):
+        r = await extract_license_plate(frame)
+        results.append(r)
+
+    logger.info(f"[Ensemble OCR] Raw results: {results}")
+
+    # 정규화: MANUAL_REVIEW_REQUIRED 접두사 제거 후 실제 값으로 카운팅
+    def _normalize(r: str) -> str:
+        return r.split(":", 1)[1] if r.startswith("MANUAL_REVIEW_REQUIRED:") else r
+
+    normalized = [_normalize(r) for r in results]
+
+    from collections import Counter
+    counts = Counter(normalized)
+    most_common_text, most_common_count = counts.most_common(1)[0]
+
+    majority_threshold = runs // 2 + 1  # runs=3 → 2표 이상
+    if most_common_count >= majority_threshold:
+        # 다수결 채택: 원본 결과 중 해당 텍스트를 가진 것의 접두사 확인
+        any_needs_review = any(
+            r.startswith("MANUAL_REVIEW_REQUIRED:") and _normalize(r) == most_common_text
+            for r in results
+        )
+        # 다수결 결과 자체가 MANUAL_REVIEW였으면 review 유지, 아니면 정상 처리
+        if any_needs_review and not any(
+            r == most_common_text for r in results
+        ):
+            logger.info(f"[Ensemble OCR] Majority (review): {most_common_text} ({most_common_count}/{runs})")
+            return f"MANUAL_REVIEW_REQUIRED:{most_common_text}"
+        logger.info(f"[Ensemble OCR] Majority: {most_common_text} ({most_common_count}/{runs})")
+        return most_common_text
+    else:
+        # 다수결 미달 → 강제 review (버그 3·4: 완전 오인식이 높은 신뢰도로 통과하는 케이스 차단)
+        logger.warning(f"[Ensemble OCR] No majority — forcing MANUAL_REVIEW. Results: {results}")
+        return f"MANUAL_REVIEW_REQUIRED:{most_common_text}"
 
 
 def _detect_plate_by_ocr_clustering(frame: np.ndarray) -> tuple[np.ndarray | None, str, bool]:
@@ -1343,9 +1388,8 @@ async def run_ocr_on_file(src_path: str) -> dict:
 async def process_violation_task(crop_frame: np.ndarray, violation_type: str, confidence: float):
     logger.info(f"Processing violation: {violation_type}...")
 
-    # OCR 실행
-    ocr_task = extract_license_plate(crop_frame)
-    plate_text_raw = await ocr_task
+    # OCR 실행 (앙상블 3회 다수결 — 버그 3·4 완전 오인식 자동승인 방어)
+    plate_text_raw = await extract_license_plate_ensemble(crop_frame, runs=3)
 
     # MANUAL_REVIEW 접두사 처리: 접두사 제거 후 실제 값만 추출, needs_review 플래그 세팅
     needs_review = False
