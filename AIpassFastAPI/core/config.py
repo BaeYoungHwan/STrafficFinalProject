@@ -51,6 +51,17 @@ class Settings(BaseSettings):
     MAX_PLAUSIBLE_SPEED_KMH: float = 100.0
     EMA_ALPHA: float = 0.3
     CONSECUTIVE_OVER_THRESHOLD: int = 5
-    
-    
+
+    # 기능 모드 분기
+    FEATURE_MODE: str = "SPEED"            # "SPEED" | "LINE_CROSSING"
+
+    # 실선 좌표 (640x480 기준 픽셀, LINE_CROSSING 모드에서만 사용)
+    LINE_X1: int = 320
+    LINE_Y1: int = 0
+    LINE_X2: int = 320
+    LINE_Y2: int = 480
+    LINE_CROSSING_COOLDOWN: float = 3.0    # 동일 차량 재단속 방지 쿨다운(초)
+    CAMERA_LOCATION_LINE: str = "강화대교_실선_01"
+
+
 settings = Settings()

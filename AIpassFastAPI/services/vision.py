@@ -161,17 +161,18 @@ def _inference_loop(model, meta_queue, event_queue, lock, stop_event,
                                       classes=settings.TARGET_CLASSES)
                 _last_results = results
 
-            # [과속 감지] 새 추론 결과일 때만 속도 업데이트 — 재사용 프레임은 EMA 왜곡 방지
-            speeding_events = process_headless(results) if _is_new_result else []
+            # [감지] 새 추론 결과일 때만 업데이트 — 재사용 프레임은 EMA 왜곡 방지
+            detected_events = process_headless(results) if _is_new_result else []
 
-            # 과속 감지된 차량에 대해 carnumber 랜덤 이미지 선정 후 이벤트 큐에 적재
-            for evt in speeding_events:
+            # 감지된 차량에 대해 carnumber 랜덤 이미지 선정 후 이벤트 큐에 적재
+            for evt in detected_events:
                 src_path = _pick_carnumber_image()
                 if not src_path:
-                    logger.warning("[InferThread] carnumber 이미지 없음. 과속 이벤트 스킵.")
+                    logger.warning("[InferThread] carnumber 이미지 없음. 이벤트 스킵.")
                     continue
                 evt["payload"]["src_image_path"] = src_path
-                safe_put({"type": "SPEEDING_VIOLATION", "payload": evt["payload"]})
+                event_type = "LINE_CROSSING_VIOLATION" if settings.FEATURE_MODE == "LINE_CROSSING" else "SPEEDING_VIOLATION"
+                safe_put({"type": event_type, "payload": evt["payload"]})
 
             # vehicle_history 스냅샷 생성 (RenderThread와 동시 접근 방지)
             snapshot = {tid: dict(data) for tid, data in vehicle_history_ref.items()}
@@ -245,6 +246,17 @@ def _render_loop(mjpeg_queue, stop_event, shared, shared_lock, MAX_PLAUSIBLE_SPE
                         cv2.putText(resized_frame, label, (x_px, y_px),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
 
+                # 실선 오버레이 (LINE_CROSSING 모드)
+                if settings.FEATURE_MODE == "LINE_CROSSING":
+                    _pt1 = (settings.LINE_X1, settings.LINE_Y1)
+                    _pt2 = (settings.LINE_X2, settings.LINE_Y2)
+                    cv2.line(resized_frame, _pt1, _pt2, (0, 255, 255), 2, cv2.LINE_AA)
+                    cv2.putText(
+                        resized_frame, "CENTER LINE",
+                        (_pt1[0] + 5, _pt1[1] + 20),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1, cv2.LINE_AA
+                    )
+
                 ret, buffer = cv2.imencode('.jpg', resized_frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
                 if not ret:
                     if _no_signal_frame is None:
@@ -277,12 +289,23 @@ def ai_inference_worker(meta_queue: Queue, event_queue: Queue, mjpeg_queue: Queu
     logger.info(f"[AI Engine] Process started. Loading {settings.YOLO_MODEL}...")
     model = YOLO(settings.YOLO_MODEL)
 
-    from services.speed_detector import (
-        process_headless_inference,
-        vehicle_history,
-        SPEED_LIMIT_KMH,
-        MAX_PLAUSIBLE_SPEED_KMH,
-    )
+    from core.config import settings as _cfg_worker
+    if _cfg_worker.FEATURE_MODE == "LINE_CROSSING":
+        from services.line_detector import process_line_crossing_detection as _detect_fn
+        from services.speed_detector import (
+            vehicle_history,
+            SPEED_LIMIT_KMH,
+            MAX_PLAUSIBLE_SPEED_KMH,
+        )
+        process_headless_inference = _detect_fn
+    else:
+        from services.speed_detector import (
+            process_headless_inference as _detect_fn,
+            vehicle_history,
+            SPEED_LIMIT_KMH,
+            MAX_PLAUSIBLE_SPEED_KMH,
+        )
+        process_headless_inference = _detect_fn
 
     def safe_put(event_data):
         try:
@@ -402,7 +425,7 @@ class VisionEngine:
             try:
                 event = self.event_queue.get_nowait()
 
-                if event["type"] == "SPEEDING_VIOLATION":
+                if event["type"] in ("SPEEDING_VIOLATION", "LINE_CROSSING_VIOLATION"):
                     # 위반 큐에 적재 → _violation_worker가 1개씩 순차 처리 (스트림 영향 없음)
                     try:
                         _violation_queue.put_nowait(event["payload"])
