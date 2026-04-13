@@ -16,18 +16,6 @@
       </button>
     </div>
 
-    <!-- 지역구 필터 탭 -->
-    <div class="district-tabs" v-if="districts.length > 1">
-      <button
-        v-for="d in districts"
-        :key="d"
-        class="tab-btn"
-        :class="{ active: (d === '전체' && !activeDistrict) || d === activeDistrict }"
-        @click="activeDistrict = d === '전체' ? '' : d"
-      >
-        {{ d }}
-      </button>
-    </div>
 
     <!-- 로딩 스켈레톤 -->
     <div v-if="loading" class="cctv-grid">
@@ -60,12 +48,7 @@
           muted
           playsinline
         ></video>
-        <div v-if="cardErrors[cctv.cctvId]" class="stream-error">
-          <div class="stream-error-inner">
-            <span class="stream-error-icon">&#8635;</span>
-            <span>재연결 중...</span>
-          </div>
-        </div>
+
         <div class="cctv-overlay">
           <span class="cctv-name">{{ cctv.cctvName }}</span>
           <div class="cctv-meta">
@@ -88,7 +71,13 @@
             </div>
             <button class="modal-close" @click="closeModal">✕</button>
           </div>
-          <div ref="modalVideoContainer" class="modal-video"></div>
+          <div class="modal-video-wrap">
+            <canvas ref="modalCanvas" class="modal-canvas"></canvas>
+            <div ref="modalSpinner" class="modal-spinner">
+              <div class="spinner-ring"></div>
+              <span>스트림 연결 중...</span>
+            </div>
+          </div>
         </div>
       </div>
     </Teleport>
@@ -104,16 +93,16 @@ import api from '../api'
 const cctvList = ref([])
 const loading = ref(false)
 const hoveredId = ref(null)
-const activeDistrict = ref('')
 
 const videoRefs = ref({})
 const hlsMap = {}
-const cardErrors = ref({})
 
 // ─── 모달 상태 ───────────────────────────────────────────────────────────────
 const selectedCctv = ref(null)
-const modalVideoContainer = ref(null)
+const modalCanvas = ref(null)
+const modalSpinner = ref(null)
 let modalHls = null
+let modalRafId = null
 
 // ─── Intersection Observer ────────────────────────────────────────────────────
 const cardRefs = {}
@@ -140,17 +129,7 @@ const observeCard = (el, cctvId) => {
 }
 
 // ─── 계산 속성 ────────────────────────────────────────────────────────────────
-const districts = computed(() => {
-  const set = new Set(cctvList.value.map(c => c.district).filter(Boolean))
-  return ['전체', ...Array.from(set)]
-})
-
-const filteredList = computed(() => {
-  if (!activeDistrict.value || activeDistrict.value === '전체') {
-    return cctvList.value.slice(0, 12)
-  }
-  return cctvList.value.filter(c => c.district === activeDistrict.value).slice(0, 12)
-})
+const filteredList = computed(() => cctvList.value.slice(0, 12))
 
 // ─── video ref 등록 ───────────────────────────────────────────────────────────
 const setVideoRef = (el, cctvId) => {
@@ -160,21 +139,13 @@ const setVideoRef = (el, cctvId) => {
 
 // ─── HLS 개별 제어 ────────────────────────────────────────────────────────────
 const initHlsForCard = (cctvId) => {
-  if (cardErrors.value[cctvId]) return // 재시도 대기 중 — 중복 초기화 방지
   const cctv = filteredList.value.find(c => c.cctvId === cctvId)
   const video = videoRefs.value[cctvId]
   if (!cctv || !video || !cctv.streamUrl) return
-  if (hlsMap[cctvId]) return // 이미 초기화됨
+  if (hlsMap[cctvId]) return
 
   if (Hls.isSupported()) {
-    const hls = new Hls({ enableWorker: false, debug: false })
-    hls.on(Hls.Events.ERROR, (_event, data) => {
-      if (data.fatal) {
-        cardErrors.value[cctvId] = true
-        destroyHlsForCard(cctvId)
-        setTimeout(() => fetchList(), 5000)
-      }
-    })
+    const hls = new Hls({ enableWorker: false })
     hls.loadSource(cctv.streamUrl)
     hls.attachMedia(video)
     hlsMap[cctvId] = hls
@@ -208,38 +179,45 @@ const fetchList = async () => {
     cctvList.value = []
   } finally {
     loading.value = false
-    cardErrors.value = {}
   }
 }
 
 // ─── 모달 제어 ────────────────────────────────────────────────────────────────
-const openModal = (cctv) => {
+const openModal = async (cctv) => {
   selectedCctv.value = cctv
+  await nextTick()
+
+  const canvas = modalCanvas.value
+  if (!canvas) return
+
+  const cardVideo = videoRefs.value[cctv.cctvId]
+  if (!cardVideo) return
+
+  // 카드 크기에 맞게 canvas 초기화
+  canvas.width = cardVideo.videoWidth || 1280
+  canvas.height = cardVideo.videoHeight || 720
+  canvas.style.opacity = '1'
+  if (modalSpinner.value) modalSpinner.value.style.opacity = '0'
+
+  // 카드 HLS 를 새로 열지 않고 RAF 로 카드 video 프레임을 canvas 에 계속 그림
+  // (ITS 서버 연결 한도 초과 방지 — 12개 카드 스트림이 이미 활성 상태)
+  if (modalRafId) cancelAnimationFrame(modalRafId)
+  const draw = () => {
+    if (!selectedCctv.value) return
+    if (cardVideo.readyState >= 2) {
+      canvas.getContext('2d').drawImage(cardVideo, 0, 0, canvas.width, canvas.height)
+    }
+    modalRafId = requestAnimationFrame(draw)
+  }
+  modalRafId = requestAnimationFrame(draw)
 }
 
-watch(selectedCctv, async (cctv) => {
-  if (!cctv) return
-  await nextTick()
-  // 카드 video 요소를 모달 컨테이너로 DOM 이동 (HLS 인스턴스 유지 → 새 연결 없음)
-  const container = modalVideoContainer.value || document.querySelector('.modal-video')
-  const cardVideo = videoRefs.value[cctv.cctvId]
-  if (container && cardVideo) {
-    container.appendChild(cardVideo)
-  }
-})
-
 const closeModal = () => {
-  const closingCctv = selectedCctv.value
+  if (modalRafId) { cancelAnimationFrame(modalRafId); modalRafId = null }
+  if (modalHls) { modalHls.destroy(); modalHls = null }
+  if (modalCanvas.value) modalCanvas.value.style.opacity = '0'
+  if (modalSpinner.value) modalSpinner.value.style.opacity = '0'
   selectedCctv.value = null
-  // 카드 video 요소 원위치 복원
-  if (closingCctv?.cctvId) {
-    const cardEl = cardRefs[closingCctv.cctvId]
-    const movedVideo = document.querySelector('.modal-video video')
-    if (movedVideo && cardEl) {
-      const overlay = cardEl.querySelector('.cctv-overlay')
-      cardEl.insertBefore(movedVideo, overlay || null)
-    }
-  }
 }
 
 // ─── Page Visibility API ──────────────────────────────────────────────────────
@@ -260,27 +238,12 @@ const onKeydown = (e) => {
   if (e.key === 'Escape') closeModal()
 }
 
-// ─── filteredList 변경 시 HLS 재초기화 ───────────────────────────────────────
-watch(filteredList, async () => {
-  // 기존 카드 unobserve + HLS 파괴
+// ─── filteredList 변경 시 observer 재등록 ─────────────────────────────────────
+watch(filteredList, () => {
   Object.entries(cardRefs).forEach(([, el]) => observer.unobserve(el))
   Object.keys(cardRefs).forEach(k => delete cardRefs[k])
   destroyHls()
-  // DOM 업데이트 대기
-  await nextTick()
-  // 카드 재등록 + viewport 내 카드는 직접 HLS 초기화
-  // (IntersectionObserver 초기 콜백이 지연/미발화되는 경우 대비)
-  document.querySelectorAll('[data-cctv-id]').forEach(el => {
-    const cctvId = el.dataset.cctvId
-    if (!cctvId) return
-    cardRefs[cctvId] = el
-    observer.observe(el)
-    // viewport 안에 있는 카드는 즉시 초기화
-    const rect = el.getBoundingClientRect()
-    if (rect.bottom > 0 && rect.top < window.innerHeight) {
-      initHlsForCard(cctvId)
-    }
-  })
+  // observeCard는 :ref 바인딩으로 nextTick 후 자동 재등록됨
 })
 
 // ─── 생명주기 ─────────────────────────────────────────────────────────────────
@@ -291,6 +254,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  if (modalRafId) { cancelAnimationFrame(modalRafId); modalRafId = null }
   destroyHls()
   closeModal()
   observer.disconnect()
@@ -367,33 +331,6 @@ onBeforeUnmount(() => {
   transform: none;
 }
 
-/* 지역구 탭 */
-.district-tabs {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 20px;
-  flex-wrap: wrap;
-}
-
-.tab-btn {
-  padding: 6px 16px;
-  border-radius: 20px;
-  border: 1.5px solid #E2E8F0;
-  background: #fff;
-  color: #6B7280;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  font-family: inherit;
-}
-
-.tab-btn.active,
-.tab-btn:hover {
-  background: #1A6DCC;
-  color: #fff;
-  border-color: #1A6DCC;
-}
 
 /* 그리드 */
 .cctv-grid {
@@ -530,36 +467,6 @@ onBeforeUnmount(() => {
   .cctv-grid { grid-template-columns: 1fr; }
 }
 
-/* ─── 스트림 에러 오버레이 ───────────────────────────────────────────────────── */
-.stream-error {
-  position: absolute;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.7);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 2;
-  border-radius: inherit;
-}
-
-.stream-error-inner {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  color: rgba(255, 255, 255, 0.8);
-  font-size: 12px;
-}
-
-.stream-error-icon {
-  font-size: 20px;
-  animation: spin 1.5s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
 /* ─── 모달 ─────────────────────────────────────────────────────────────────── */
 .modal-backdrop {
   position: fixed;
@@ -633,18 +540,64 @@ onBeforeUnmount(() => {
   background: rgba(239, 68, 68, 0.7);
 }
 
-.modal-video {
+.modal-video-wrap {
+  position: relative;
   width: 100%;
   aspect-ratio: 16 / 9;
-  display: block;
   background: #000;
-  overflow: hidden;
 }
 
-.modal-video video {
+.modal-video {
   width: 100%;
   height: 100%;
-  object-fit: cover;
   display: block;
+  object-fit: cover;
+}
+
+/* 카드 라이브 스트림을 RAF 로 복사하는 canvas — 모달의 실제 디스플레이 */
+.modal-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 로딩 스피너 */
+.modal-spinner {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 6px 12px;
+  border-radius: 20px;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+
+.modal-spinner span {
+  color: rgba(255,255,255,0.85);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+}
+
+.spinner-ring {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255,255,255,0.25);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 </style>
