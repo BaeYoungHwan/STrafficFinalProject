@@ -235,27 +235,19 @@
         <div class="modal-box">
           <div class="modal-header">
             <div class="modal-title-wrap">
-              <span class="live-badge">LIVE</span>
+              <span class="live-badge">● LIVE</span>
               <span class="modal-name">{{ streamModal.name }}</span>
             </div>
-            <button class="modal-close" @click="closeModal">&#x2715;</button>
+            <button class="modal-close" @click="closeModal">✕</button>
           </div>
-          <div class="modal-stream">
-            <template v-if="streamModal.loading">
-              <div class="stream-loading">스트림 로딩 중...</div>
-            </template>
-            <template v-else-if="streamModal.error || !streamModal.url">
-              <div class="stream-error">스트림을 불러올 수 없습니다.</div>
-            </template>
-            <template v-else>
-              <video
-                ref="modalVideo"
-                class="stream-img"
-                autoplay
-                muted
-                playsinline
-              ></video>
-            </template>
+          <div class="modal-video-wrap">
+            <canvas ref="modalCanvas" class="modal-canvas"></canvas>
+            <video ref="modalVideo" class="stream-img" autoplay muted playsinline></video>
+            <div ref="modalSpinner" class="modal-spinner">
+              <div class="spinner-ring"></div>
+              <span>스트림 연결 중...</span>
+            </div>
+            <div v-if="streamModal.error" class="stream-error-overlay">스트림을 불러올 수 없습니다.</div>
           </div>
         </div>
       </div>
@@ -329,10 +321,11 @@ const streamModal = ref({
   open: false,
   name: '',
   url: '',
-  loading: false,
   error: false
 })
 const modalVideo = ref(null)
+const modalCanvas = ref(null)
+const modalSpinner = ref(null)
 let modalHls = null
 
 // ─── 누적 교통량 computed ─────────────────────────────────────────────────────
@@ -459,16 +452,13 @@ const findNearestCctv = (lat, lng) => {
 const openModal = async (intersection) => {
   if (modalHls) { modalHls.destroy(); modalHls = null }
 
-  streamModal.value = {
-    open: true,
-    name: intersection.name || 'CCTV',
-    url: '',
-    loading: true,
-    error: false
-  }
+  streamModal.value = { open: true, name: intersection.name || 'CCTV', url: '', error: false }
+  await nextTick()
+
+  // 스피너 즉시 표시
+  if (modalSpinner.value) modalSpinner.value.style.opacity = '1'
 
   try {
-    // CCTV 목록이 없으면 먼저 로드
     if (!cctvList.value.length) {
       const res = await api.get('/cctv/list')
       cctvList.value = res.data?.data || res.data || []
@@ -479,13 +469,13 @@ const openModal = async (intersection) => {
 
     if (!url) {
       streamModal.value.error = true
-      streamModal.value.loading = false
+      if (modalSpinner.value) modalSpinner.value.style.opacity = '0'
       return
     }
-    streamModal.value.url = url
-    streamModal.value.loading = false
 
+    streamModal.value.url = url
     await nextTick()
+
     const video = modalVideo.value
     if (!video) return
 
@@ -493,14 +483,21 @@ const openModal = async (intersection) => {
       modalHls = new Hls({ enableWorker: false })
       modalHls.loadSource(url)
       modalHls.attachMedia(video)
+      video.addEventListener('canplay', () => {
+        video.play().catch(() => {})
+        if (modalCanvas.value) modalCanvas.value.style.opacity = '0'
+        if (modalSpinner.value) modalSpinner.value.style.opacity = '0'
+      }, { once: true })
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = url
+      if (modalSpinner.value) modalSpinner.value.style.opacity = '0'
     } else {
       streamModal.value.error = true
+      if (modalSpinner.value) modalSpinner.value.style.opacity = '0'
     }
   } catch {
     streamModal.value.error = true
-    streamModal.value.loading = false
+    if (modalSpinner.value) modalSpinner.value.style.opacity = '0'
   }
 }
 
@@ -508,9 +505,9 @@ const openModal = async (intersection) => {
 const closeModal = () => {
   if (modalHls) { modalHls.destroy(); modalHls = null }
   if (modalVideo.value) modalVideo.value.src = ''
-  streamModal.value.open = false
-  streamModal.value.url = ''
-  streamModal.value.error = false
+  if (modalCanvas.value) modalCanvas.value.style.opacity = '0'
+  if (modalSpinner.value) modalSpinner.value.style.opacity = '0'
+  streamModal.value = { open: false, name: '', url: '', error: false }
 }
 
 // ─── 키보드 이벤트 ────────────────────────────────────────────────────────────
@@ -1221,13 +1218,11 @@ onUnmounted(() => {
   background: rgba(239, 68, 68, 0.7);
 }
 
-.modal-stream {
+.modal-video-wrap {
+  position: relative;
   width: 100%;
   aspect-ratio: 16 / 9;
   background: #000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .stream-img {
@@ -1237,15 +1232,57 @@ onUnmounted(() => {
   display: block;
 }
 
-.stream-loading,
-.stream-error {
-  color: rgba(255, 255, 255, 0.6);
-  font-size: 14px;
-  text-align: center;
+.modal-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  pointer-events: none;
 }
 
-.stream-error {
+.modal-spinner {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 6px 12px;
+  border-radius: 20px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.modal-spinner span {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.spinner-ring {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.stream-error-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: rgba(239, 68, 68, 0.8);
+  font-size: 14px;
 }
 
 /* ─── 누적 교통량 위젯 ──────────────────────────────────────────────────────── */

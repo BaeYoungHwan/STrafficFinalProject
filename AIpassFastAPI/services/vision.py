@@ -148,10 +148,13 @@ def _inference_loop(model, meta_queue, event_queue, lock, stop_event,
             finally:
                 existing_shm.close()
 
-            # 2프레임에 1회만 YOLO 추론 — 나머지는 이전 결과 재사용으로 CPU 부하 절반 감소
+            # LINE_CROSSING 모드: 상태머신(pending_cross)이 연속 프레임 판정을 요구하므로 스킵 금지
+            # SPEED 모드: 2프레임에 1회 스킵으로 CPU 부하 절반 감소 유지
             _infer_counter += 1
             _is_new_result = True
-            if _infer_counter % 2 == 0 and _last_results is not None:
+            _skip_enabled = (settings.FEATURE_MODE != "LINE_CROSSING")
+
+            if _skip_enabled and _infer_counter % 2 == 0 and _last_results is not None:
                 results = _last_results
                 _is_new_result = False
             else:
@@ -168,9 +171,14 @@ def _inference_loop(model, meta_queue, event_queue, lock, stop_event,
             for evt in detected_events:
                 src_path = _pick_carnumber_image()
                 if not src_path:
-                    logger.warning("[InferThread] carnumber 이미지 없음. 이벤트 스킵.")
-                    continue
-                evt["payload"]["src_image_path"] = src_path
+                    if settings.FEATURE_MODE != "LINE_CROSSING":
+                        # 과속 모드: 이미지 없으면 스킵 (번호판 인식 필수)
+                        logger.warning("[InferThread] carnumber 이미지 없음. 이벤트 스킵.")
+                        continue
+                    # LINE_CROSSING 모드: 이미지 없어도 이벤트 전송 (번호판은 미인식 처리)
+                    logger.warning("[InferThread] carnumber 이미지 없음. 미인식 처리로 이벤트 전송.")
+                else:
+                    evt["payload"]["src_image_path"] = src_path
                 event_type = "LINE_CROSSING_VIOLATION" if settings.FEATURE_MODE == "LINE_CROSSING" else "SPEEDING_VIOLATION"
                 safe_put({"type": event_type, "payload": evt["payload"]})
 
@@ -198,7 +206,7 @@ def _render_loop(mjpeg_queue, stop_event, shared, shared_lock, MAX_PLAUSIBLE_SPE
         img = np.zeros((480, 640, 3), dtype=np.uint8)
         cv2.putText(img, "Waiting for stream...", (140, 240),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (200, 200, 200), 2, cv2.LINE_AA)
-        _, buf = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 60])
+        _, buf = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 50])
         return buf.tobytes()
 
     while not stop_event.is_set():
@@ -246,18 +254,40 @@ def _render_loop(mjpeg_queue, stop_event, shared, shared_lock, MAX_PLAUSIBLE_SPE
                         cv2.putText(resized_frame, label, (x_px, y_px),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
 
+                # 실선 침범 차량 빨간 박스 (LINE_CROSSING 모드)
+                if settings.FEATURE_MODE == "LINE_CROSSING" and \
+                        results[0].boxes and results[0].boxes.id is not None:
+                    from services.line_detector import get_violating_ids
+                    _violating = get_violating_ids()
+                    if _violating:
+                        _ids = results[0].boxes.id.int().cpu().tolist()
+                        _xyxy = results[0].boxes.xyxy.cpu().numpy()
+                        _sx = 640 / frame_shape[1]
+                        _sy = 480 / frame_shape[0]
+                        for _i, _tid in enumerate(_ids):
+                            if _tid in _violating:
+                                x1, y1, x2, y2 = _xyxy[_i]
+                                rx1 = int(x1 * _sx); ry1 = int(y1 * _sy)
+                                rx2 = int(x2 * _sx); ry2 = int(y2 * _sy)
+                                cv2.rectangle(resized_frame, (rx1, ry1), (rx2, ry2), (0, 0, 255), 3)
+                                cv2.putText(resized_frame, "VIOLATION",
+                                            (rx1, ry1 - 8),
+                                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 2, cv2.LINE_AA)
+
                 # 실선 오버레이 (LINE_CROSSING 모드)
                 if settings.FEATURE_MODE == "LINE_CROSSING":
-                    _pt1 = (settings.LINE_X1, settings.LINE_Y1)
-                    _pt2 = (settings.LINE_X2, settings.LINE_Y2)
-                    cv2.line(resized_frame, _pt1, _pt2, (0, 255, 255), 2, cv2.LINE_AA)
-                    cv2.putText(
-                        resized_frame, "CENTER LINE",
-                        (_pt1[0] + 5, _pt1[1] + 20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1, cv2.LINE_AA
-                    )
+                    # 하행선 실선 (강화 방향) — 파란색
+                    cv2.line(resized_frame,
+                             (settings.LINE_X1, settings.LINE_Y1),
+                             (settings.LINE_X2, settings.LINE_Y2),
+                             (255, 100, 0), 2, cv2.LINE_AA)
+                    # 상행선 실선 (서울 방향) — 노란색
+                    cv2.line(resized_frame,
+                             (settings.LINE2_X1, settings.LINE2_Y1),
+                             (settings.LINE2_X2, settings.LINE2_Y2),
+                             (0, 255, 255), 2, cv2.LINE_AA)
 
-                ret, buffer = cv2.imencode('.jpg', resized_frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
+                ret, buffer = cv2.imencode('.jpg', resized_frame, [cv2.IMWRITE_JPEG_QUALITY, 50])
                 if not ret:
                     if _no_signal_frame is None:
                         _no_signal_frame = _make_no_signal_frame()
@@ -347,7 +377,7 @@ def ai_inference_worker(meta_queue: Queue, event_queue: Queue, mjpeg_queue: Queu
 
 
 async def _handle_speeding_violation(payload: dict):
-    """과속 이벤트: carnumber 이미지에 OCR 실행 → webhook 전송"""
+    """과속/실선침범 이벤트: carnumber 이미지에 OCR 실행 → webhook 전송"""
     payload["cameraId"] = vision_engine.camera_id
     src_path = payload.pop("src_image_path", None)
     if src_path:
@@ -383,7 +413,7 @@ async def _handle_speeding_violation_safe(payload: dict):
 
 
 async def _violation_worker():
-    """과속 위반을 1개씩 순차 처리 — 동시 OCR 코루틴 누적을 차단하여 MJPEG 스트림 보호"""
+    """위반(과속/실선침범)을 1개씩 순차 처리 — 동시 OCR 코루틴 누적을 차단하여 MJPEG 스트림 보호"""
     while True:
         payload = await _violation_queue.get()
         await _handle_speeding_violation_safe(payload)
@@ -393,7 +423,7 @@ class VisionEngine:
     def __init__(self, rtsp_url: str):
         self.rtsp_url = rtsp_url
         self.camera_id: str = settings.CAMERA_ID
-        self.meta_queue = Queue(maxsize=3)
+        self.meta_queue = Queue(maxsize=6)
         self.event_queue = Queue(maxsize=100)
         self.mjpeg_queue = Queue(maxsize=10)
 
