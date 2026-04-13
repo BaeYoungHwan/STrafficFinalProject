@@ -3,6 +3,7 @@ package com.aipass.service;
 import com.aipass.dao.NotificationMapper;
 import com.aipass.dto.NotificationDTO;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -11,6 +12,8 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class NotificationService {
@@ -20,6 +23,19 @@ public class NotificationService {
     private final CopyOnWriteArrayList<SseEmitter> emitters = new CopyOnWriteArrayList<>();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    @PostConstruct
+    public void startHeartbeat() {
+        Executors.newSingleThreadScheduledExecutor().scheduleAtFixedRate(() -> {
+            for (SseEmitter emitter : emitters) {
+                try {
+                    emitter.send(SseEmitter.event().name("ping").data(""));
+                } catch (IOException e) {
+                    emitters.remove(emitter);
+                }
+            }
+        }, 30, 30, TimeUnit.SECONDS);
+    }
+
     @Autowired
     private NotificationMapper notificationMapper;
 
@@ -27,7 +43,7 @@ public class NotificationService {
      * SSE 구독 등록 (타임아웃 5분)
      */
     public SseEmitter subscribe() {
-        SseEmitter emitter = new SseEmitter(300_000L);
+        SseEmitter emitter = new SseEmitter(Long.MAX_VALUE);
         emitters.add(emitter);
         emitter.onCompletion(() -> emitters.remove(emitter));
         emitter.onTimeout(() -> emitters.remove(emitter));
