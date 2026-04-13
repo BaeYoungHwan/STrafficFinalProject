@@ -129,7 +129,7 @@
             <div class="image-box-label">차량 전체</div>
             <img
               v-if="selectedItem.srcImageUrl"
-              :src="'/ai/images/' + selectedItem.srcImageUrl"
+              :src="(selectedItem.violationType === 'LINE_CROSSING_VIOLATION' ? '/ai-line/images/' : '/ai/images/') + selectedItem.srcImageUrl"
               alt="차량 전체 사진"
               @error="$event.target.style.display='none'"
             />
@@ -139,7 +139,7 @@
             <div class="image-box-label">번호판 크롭</div>
             <img
               v-if="selectedItem.imageUrl"
-              :src="'/ai/images/' + selectedItem.imageUrl"
+              :src="(selectedItem.violationType === 'LINE_CROSSING_VIOLATION' ? '/ai-line/images/' : '/ai/images/') + selectedItem.imageUrl"
               alt="번호판"
               @error="$event.target.style.display='none'"
             />
