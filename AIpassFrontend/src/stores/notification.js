@@ -17,7 +17,7 @@ export const useNotificationStore = defineStore('notification', () => {
       const data = JSON.parse(e.data)
       notifications.value.unshift(data)
       unreadCount.value++
-      if (data.type === 'VIOLATION') violationTick.value++
+      if (data.eventType === 'VIOLATION') violationTick.value++
     })
 
     eventSource.onerror = () => {
