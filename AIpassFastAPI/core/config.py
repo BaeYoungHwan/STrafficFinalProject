@@ -56,10 +56,16 @@ class Settings(BaseSettings):
     FEATURE_MODE: str = "SPEED"            # "SPEED" | "LINE_CROSSING"
 
     # 실선 좌표 (640x480 기준 픽셀, LINE_CROSSING 모드에서만 사용)
-    LINE_X1: int = 320
-    LINE_Y1: int = 0
-    LINE_X2: int = 320
-    LINE_Y2: int = 480
+    # 하행선 (강화 방향) 실선 — 차량이 지나는 구간만
+    LINE_X1: int = 400
+    LINE_Y1: int = 240
+    LINE_X2: int = 275
+    LINE_Y2: int = 420
+    # 상행선 (서울 방향) 실선 — 차량이 지나는 구간만
+    LINE2_X1: int = 460
+    LINE2_Y1: int = 240
+    LINE2_X2: int = 400
+    LINE2_Y2: int = 410
     LINE_CROSSING_COOLDOWN: float = 3.0    # 동일 차량 재단속 방지 쿨다운(초)
     CAMERA_LOCATION_LINE: str = "강화대교_실선_01"
 
