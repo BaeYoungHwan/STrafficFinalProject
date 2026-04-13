@@ -45,6 +45,7 @@ def update_and_get_speed(track_id: int, center_x: float, y_max: float, current_t
             'ema_speed': 0.0,
             'is_reported': False,
             'consecutive_over': 0,
+            'last_reported_time': 0.0,
         }
 
     history = vehicle_history[track_id]['history']
@@ -109,10 +110,13 @@ def process_headless_inference(results) -> list:
                 data['consecutive_over'] = 0
                 data['is_reported'] = False
 
+            elapsed = current_time - data['last_reported_time']
             if (current_speed > SPEED_LIMIT_KMH
                     and data['consecutive_over'] >= CONSECUTIVE_OVER_THRESHOLD
-                    and not data['is_reported']):
+                    and not data['is_reported']
+                    and elapsed >= _cfg.SPEEDING_COOLDOWN):
                 data['is_reported'] = True
+                data['last_reported_time'] = current_time
 
                 payload = {
                     "eventId": f"EVT-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:4].upper()}",
