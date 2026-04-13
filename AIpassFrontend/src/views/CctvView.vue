@@ -71,7 +71,13 @@
             </div>
             <button class="modal-close" @click="closeModal">✕</button>
           </div>
-          <video ref="modalVideo" class="modal-video" autoplay muted playsinline></video>
+          <div class="modal-video-wrap">
+            <canvas ref="modalCanvas" class="modal-canvas"></canvas>
+            <div ref="modalSpinner" class="modal-spinner">
+              <div class="spinner-ring"></div>
+              <span>스트림 연결 중...</span>
+            </div>
+          </div>
         </div>
       </div>
     </Teleport>
@@ -93,8 +99,10 @@ const hlsMap = {}
 
 // ─── 모달 상태 ───────────────────────────────────────────────────────────────
 const selectedCctv = ref(null)
-const modalVideo = ref(null)
+const modalCanvas = ref(null)
+const modalSpinner = ref(null)
 let modalHls = null
+let modalRafId = null
 
 // ─── Intersection Observer ────────────────────────────────────────────────────
 const cardRefs = {}
@@ -178,23 +186,37 @@ const fetchList = async () => {
 const openModal = async (cctv) => {
   selectedCctv.value = cctv
   await nextTick()
-  const video = modalVideo.value
-  if (!video || !cctv.streamUrl) return
 
-  if (modalHls) { modalHls.destroy(); modalHls = null }
+  const canvas = modalCanvas.value
+  if (!canvas) return
 
-  if (Hls.isSupported()) {
-    modalHls = new Hls({ enableWorker: false })
-    modalHls.loadSource(cctv.streamUrl)
-    modalHls.attachMedia(video)
-  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-    video.src = cctv.streamUrl
+  const cardVideo = videoRefs.value[cctv.cctvId]
+  if (!cardVideo) return
+
+  // 카드 크기에 맞게 canvas 초기화
+  canvas.width = cardVideo.videoWidth || 1280
+  canvas.height = cardVideo.videoHeight || 720
+  canvas.style.opacity = '1'
+  if (modalSpinner.value) modalSpinner.value.style.opacity = '0'
+
+  // 카드 HLS 를 새로 열지 않고 RAF 로 카드 video 프레임을 canvas 에 계속 그림
+  // (ITS 서버 연결 한도 초과 방지 — 12개 카드 스트림이 이미 활성 상태)
+  if (modalRafId) cancelAnimationFrame(modalRafId)
+  const draw = () => {
+    if (!selectedCctv.value) return
+    if (cardVideo.readyState >= 2) {
+      canvas.getContext('2d').drawImage(cardVideo, 0, 0, canvas.width, canvas.height)
+    }
+    modalRafId = requestAnimationFrame(draw)
   }
+  modalRafId = requestAnimationFrame(draw)
 }
 
 const closeModal = () => {
+  if (modalRafId) { cancelAnimationFrame(modalRafId); modalRafId = null }
   if (modalHls) { modalHls.destroy(); modalHls = null }
-  if (modalVideo.value) modalVideo.value.src = ''
+  if (modalCanvas.value) modalCanvas.value.style.opacity = '0'
+  if (modalSpinner.value) modalSpinner.value.style.opacity = '0'
   selectedCctv.value = null
 }
 
@@ -232,6 +254,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  if (modalRafId) { cancelAnimationFrame(modalRafId); modalRafId = null }
   destroyHls()
   closeModal()
   observer.disconnect()
@@ -517,11 +540,64 @@ onBeforeUnmount(() => {
   background: rgba(239, 68, 68, 0.7);
 }
 
-.modal-video {
+.modal-video-wrap {
+  position: relative;
   width: 100%;
   aspect-ratio: 16 / 9;
-  display: block;
   background: #000;
+}
+
+.modal-video {
+  width: 100%;
+  height: 100%;
+  display: block;
   object-fit: cover;
+}
+
+/* 카드 라이브 스트림을 RAF 로 복사하는 canvas — 모달의 실제 디스플레이 */
+.modal-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 로딩 스피너 */
+.modal-spinner {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 6px 12px;
+  border-radius: 20px;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+
+.modal-spinner span {
+  color: rgba(255,255,255,0.85);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+}
+
+.spinner-ring {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255,255,255,0.25);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 </style>

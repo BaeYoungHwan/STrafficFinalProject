@@ -272,17 +272,19 @@ const streamTitle = ref('실시간 과속 감지 모니터')
 
 function openSpeedStream() {
   streamTitle.value = '실시간 과속 감지 모니터'
-  streamUrl.value = import.meta.env.DEV
+  const base = import.meta.env.DEV
     ? (import.meta.env.VITE_FASTAPI_SPEED_URL || 'http://localhost:8000') + '/api/v1/stream/video'
     : '/ai/api/v1/stream/video'
+  streamUrl.value = base + '?t=' + Date.now()
   showStreamModal.value = true
 }
 
 function openLineStream() {
   streamTitle.value = '실시간 실선침범 감지 모니터'
-  streamUrl.value = import.meta.env.DEV
+  const base = import.meta.env.DEV
     ? (import.meta.env.VITE_FASTAPI_LINE_URL || 'http://localhost:8001') + '/api/v1/stream/video'
     : '/ai-line/api/v1/stream/video'
+  streamUrl.value = base + '?t=' + Date.now()
   showStreamModal.value = true
 }
 
