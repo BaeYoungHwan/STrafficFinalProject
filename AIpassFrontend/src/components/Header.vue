@@ -6,6 +6,7 @@
       </router-link>
     </div>
     <div class="header-right">
+      <NotificationBell />
       <button class="btn-logout" @click="handleLogout">LOGOUT</button>
       <router-link to="/mypage" class="btn-mypage">MYPAGE</router-link>
     </div>
@@ -16,6 +17,7 @@
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import aipassLogo from '../assets/logos/AI-PASS_LOGO.png'
+import NotificationBell from './NotificationBell.vue'
 
 const router = useRouter()
 const auth = useAuthStore()
