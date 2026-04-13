@@ -5,6 +5,7 @@ import api from '../api/index'
 export const useNotificationStore = defineStore('notification', () => {
   const notifications = ref([])
   const unreadCount = ref(0)
+  const violationTick = ref(0)
   let eventSource = null
 
   // SSE 연결
@@ -16,6 +17,7 @@ export const useNotificationStore = defineStore('notification', () => {
       const data = JSON.parse(e.data)
       notifications.value.unshift(data)
       unreadCount.value++
+      if (data.type === 'VIOLATION') violationTick.value++
     })
 
     eventSource.onerror = () => {
@@ -72,6 +74,7 @@ export const useNotificationStore = defineStore('notification', () => {
   return {
     notifications,
     unreadCount,
+    violationTick,
     connect,
     disconnect,
     fetchInitial,

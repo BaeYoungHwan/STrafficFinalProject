@@ -249,6 +249,10 @@
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import api from '../api'
+import { useNotificationStore } from '../stores/notification'
+
+const notifStore = useNotificationStore()
+watch(() => notifStore.violationTick, () => fetchList())
 
 const items = ref([])
 const loading = ref(false)
