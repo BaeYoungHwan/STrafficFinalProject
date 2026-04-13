@@ -460,7 +460,7 @@ class VisionEngine:
                     try:
                         _violation_queue.put_nowait(event["payload"])
                     except asyncio.QueueFull:
-                        logger.warning("[EventLoop] 위반 큐 포화(10개) — 이벤트 드롭")
+                        logger.warning(f"[EventLoop] 위반 큐 포화({_violation_queue.maxsize}개) — 이벤트 드롭")
 
             except queue.Empty:
                 await asyncio.sleep(0.05)  # 이벤트 없으면 50ms 대기 — 스레드풀 미사용
