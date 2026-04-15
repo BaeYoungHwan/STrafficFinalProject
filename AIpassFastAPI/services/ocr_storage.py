@@ -27,6 +27,7 @@ PLATE_PATTERN = re.compile(
     rf"^(\d{{2,3}}{_VALID_CHARS}\d{{4}}|[가-힣]{{2}}\s?\d{{2}}{_VALID_CHARS}\d{{4}})$"
 )
 CONFIDENCE_THRESHOLD = 0.85
+EASYOCR_CONFIDENCE_THRESHOLD = 0.70  # EasyOCR conf 분포가 PaddleOCR보다 낮음
 
 # OCR 오인식 교정 테이블: OCR이 잘못 읽은 문자 → 한글 후보 목록 (유사도 순)
 _OCR_CORRECTION_MAP: dict[str, list[str]] = {
@@ -136,6 +137,72 @@ def _correct_ocr_text(text: str) -> list[str]:
         if PLATE_PATTERN.match(corrected):
             candidates.append(corrected)
     return candidates
+
+
+def _run_easyocr_on_crop(img: np.ndarray) -> tuple[str | None, float]:
+    """EasyOCR로 번호판 크롭 이미지에서 텍스트를 추출한다.
+
+    EasyOCR 결과 형식: [(bbox, text, confidence), ...]
+    PaddleOCR와 달리 단일 리스트이며 bbox는 4점 좌표 리스트.
+
+    Returns:
+        (plate_text, confidence): PLATE_PATTERN 매칭 시 번호판 문자열과 평균 신뢰도.
+                                  매칭 실패 시 (None, 0.0).
+    """
+    if img is None or img.size == 0:
+        return None, 0.0
+    try:
+        reader = _get_easyocr_reader()
+        raw_results = reader.readtext(img, detail=1, paragraph=False)
+    except Exception as exc:
+        logger.warning("[EasyOCR] 추론 오류: %s", exc)
+        return None, 0.0
+
+    if not raw_results:
+        return None, 0.0
+
+    # bbox x좌표 기준 정렬 (번호판 좌→우 순서 보장)
+    # EasyOCR bbox: [[x1,y1],[x2,y1],[x2,y2],[x1,y2]]
+    def _bbox_x_center(item):
+        bbox = item[0]
+        xs = [p[0] for p in bbox]
+        return sum(xs) / len(xs)
+
+    sorted_results = sorted(raw_results, key=_bbox_x_center)
+
+    texts = []
+    confs = []
+    for (bbox, text, conf) in sorted_results:
+        corrected = _correct_digit_positions(text)
+        cleaned = re.sub(r'[^0-9가-힣]', '', corrected)
+        if cleaned:
+            texts.append(cleaned)
+            confs.append(float(conf))
+
+    if not texts:
+        return None, 0.0
+
+    avg_conf = sum(confs) / len(confs)
+    combined = "".join(texts)
+
+    # 시도 1: 직접 결합 → PLATE_PATTERN 매칭
+    if PLATE_PATTERN.match(combined):
+        logger.info("[EasyOCR] 직접 인식: %s (conf=%.3f)", combined, avg_conf)
+        return combined, avg_conf
+
+    # 시도 2: _positional_hangul_recovery 교정 시도
+    recovered = _positional_hangul_recovery(combined)
+    if recovered:
+        logger.info("[EasyOCR] 위치기반 교정: %s → %s (conf=%.3f)", combined, recovered, avg_conf)
+        return recovered, avg_conf * 0.9  # 교정됐으므로 신뢰도 10% 페널티
+
+    # 시도 3: _correct_ocr_text 교정 테이블 시도
+    corrections = _correct_ocr_text(combined)
+    if corrections:
+        logger.info("[EasyOCR] 교정테이블: %s → %s (conf=%.3f)", combined, corrections[0], avg_conf)
+        return corrections[0], avg_conf * 0.85
+
+    return None, 0.0
 
 
 # 유사 한글 혼동 교정 테이블 (획 모양이 비슷해서 OCR이 오인식하는 케이스)
@@ -272,6 +339,34 @@ ocr_model = PaddleOCR(
     det_db_box_thresh=0.4,  # 기본 0.5 → 작은 문자 bbox 생존
     rec_batch_num=7,        # 번호판 최대 7문자 일괄 처리 (지역 번호판 대응)
 )
+
+
+# ── EasyOCR Lazy Initializer ─────────────────────────────────────────────
+_easyocr_reader = None
+_easyocr_lock = None
+
+
+def _get_easyocr_reader():
+    """EasyOCR Reader 지연 초기화. 첫 UNRECOGNIZED 케이스 발생 시에만 모델 로딩.
+
+    threading.Lock으로 _ocr_executor 스레드 간 중복 초기화 방지.
+    gpu=False: PaddleOCR와 GPU 메모리 경합 방지.
+    """
+    global _easyocr_reader, _easyocr_lock
+    import threading
+    if _easyocr_lock is None:
+        _easyocr_lock = threading.Lock()
+    with _easyocr_lock:
+        if _easyocr_reader is None:
+            import easyocr
+            logger.info("[EasyOCR] 모델 초기화 시작 (ko + en)...")
+            _easyocr_reader = easyocr.Reader(
+                ['ko', 'en'],
+                gpu=False,
+                verbose=False,
+            )
+            logger.info("[EasyOCR] 모델 초기화 완료")
+    return _easyocr_reader
 
 
 def _normalize_ocr_result(result) -> list | None:
@@ -1332,6 +1427,31 @@ async def run_ocr_on_file(src_path: str) -> dict:
         if _fb_stage_minus1_text:
             logger.warning(f"[OCR] Stage-1 부분 결과 활용: {_fb_stage_minus1_text} (conf={_fb_stage_minus1_conf:.3f})")
             return _fb_stage_minus1_crop, f"MANUAL_REVIEW_REQUIRED:{_fb_stage_minus1_text}", True
+
+        # ── Stage 8: EasyOCR Fallback ─────────────────────────────────────────
+        # PaddleOCR 전 단계 실패 시에만 진입. 기존 파이프라인 변경 없음.
+        # 투입 우선순위: yolo_crop > _fb_stage_minus1_crop > bumper_frame
+        _s8_sources = [
+            ("YOLO",    yolo_crop),
+            ("Stage-1", _fb_stage_minus1_crop),
+            ("bumper",  bumper_frame),
+        ]
+        for _s8_name, _s8_img in _s8_sources:
+            if _s8_img is None:
+                continue
+            if not _validate_crop(_s8_img):
+                continue
+            logger.debug("[OCR Stage8] EasyOCR 시도: source=%s", _s8_name)
+            _s8_text, _s8_conf = _run_easyocr_on_crop(_s8_img)
+            if _s8_text:
+                _s8_needs_review = _s8_conf < EASYOCR_CONFIDENCE_THRESHOLD
+                logger.info(
+                    "[OCR Stage8] EasyOCR 인식 성공: %s (source=%s, conf=%.3f, needs_review=%s)",
+                    _s8_text, _s8_name, _s8_conf, _s8_needs_review,
+                )
+                return _s8_img, _s8_text, _s8_needs_review
+
+        logger.warning("[OCR Stage8] EasyOCR 모두 실패 → UNRECOGNIZED")
         return None, "UNRECOGNIZED", True
 
     # OCR 전용 executor + 세마포어로 동시 실행 수 제한 (MJPEG 스트림 스레드 보호)
