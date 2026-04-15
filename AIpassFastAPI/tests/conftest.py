@@ -41,3 +41,15 @@ class _FakeYOLO:
 
 _ultra_stub.YOLO = _FakeYOLO
 sys.modules.setdefault("ultralytics", _ultra_stub)
+
+# ── easyocr 스텁 (실제 모델 로딩 없이 Stage 8 테스트 가능) ──
+_easyocr_stub = types.ModuleType("easyocr")
+
+class _FakeEasyOCRReader:
+    def __init__(self, *args, **kwargs):
+        pass
+    def readtext(self, img, **kwargs):
+        return []
+
+_easyocr_stub.Reader = _FakeEasyOCRReader
+sys.modules.setdefault("easyocr", _easyocr_stub)

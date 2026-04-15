@@ -67,6 +67,7 @@ class Settings(BaseSettings):
     LINE2_X2: int = 400
     LINE2_Y2: int = 410
     LINE_CROSSING_COOLDOWN: float = 3.0    # 동일 차량 재단속 방지 쿨다운(초)
+    SPEEDING_COOLDOWN: float = 10.0        # 과속 동일 차량 재단속 방지 쿨다운(초)
     CAMERA_LOCATION_LINE: str = "강화대교_실선_01"
 
 
