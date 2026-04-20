@@ -8,18 +8,10 @@
       </div>
       <div class="header-filters">
         <select v-model="riskFilter" class="filter-select">
-          <option value="">위험도 전체</option>
-          <option value="LOW">정상 (LOW)</option>
-          <option value="MEDIUM">주의 (MEDIUM)</option>
-          <option value="HIGH">경고 (HIGH)</option>
-          <option value="CRITICAL">위험 (CRITICAL)</option>
+          <option v-for="opt in RISK_FILTER_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
         </select>
         <select v-model="statusFilter" class="filter-select">
-          <option value="">상태 전체</option>
-          <option value="OPERATIONAL">정상가능</option>
-          <option value="REQUESTED">점검요청</option>
-          <option value="IN_PROGRESS">점검중</option>
-          <option value="REQUIRED">점검요망</option>
+          <option v-for="opt in STATUS_FILTER_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
         </select>
       </div>
     </div>
@@ -61,12 +53,12 @@
                   <span
                     class="risk-badge"
                     :style="{
-                      color: RISK_CONFIG[eq.riskLevel].color,
-                      background: RISK_CONFIG[eq.riskLevel].bg
+                      color: getRiskConfig(eq.riskLevel).color,
+                      background: getRiskConfig(eq.riskLevel).bg
                     }"
                   >
-                    <span class="risk-dot" :style="{ background: RISK_CONFIG[eq.riskLevel].color }"></span>
-                    {{ RISK_CONFIG[eq.riskLevel].label }}
+                    <span class="risk-dot" :style="{ background: getRiskConfig(eq.riskLevel).color }"></span>
+                    {{ getRiskConfig(eq.riskLevel).label }}
                   </span>
                 </td>
                 <td class="col-rul">
@@ -79,11 +71,11 @@
                   <span
                     class="status-tag"
                     :style="{
-                      color: STATUS_CONFIG[eq.status].color,
-                      background: STATUS_CONFIG[eq.status].bg,
-                      borderColor: STATUS_CONFIG[eq.status].color + '40'
+                      color: getStatusConfig(eq.status).color,
+                      background: getStatusConfig(eq.status).bg,
+                      borderColor: getStatusConfig(eq.status).color + '40'
                     }"
-                  >{{ STATUS_CONFIG[eq.status].label }}</span>
+                  >{{ getStatusConfig(eq.status).label }}</span>
                 </td>
                 <td class="col-date">{{ eq.lastInspection }}</td>
               </tr>
@@ -112,11 +104,11 @@
               <span
                 class="status-tag"
                 :style="{
-                  color: STATUS_CONFIG[selectedEquipment.status].color,
-                  background: STATUS_CONFIG[selectedEquipment.status].bg,
-                  borderColor: STATUS_CONFIG[selectedEquipment.status].color + '40'
+                  color: getStatusConfig(selectedEquipment.status).color,
+                  background: getStatusConfig(selectedEquipment.status).bg,
+                  borderColor: getStatusConfig(selectedEquipment.status).color + '40'
                 }"
-              >{{ STATUS_CONFIG[selectedEquipment.status].label }}</span>
+              >{{ getStatusConfig(selectedEquipment.status).label }}</span>
             </div>
             <button class="close-btn" @click="closePanel">×</button>
           </div>
@@ -141,8 +133,8 @@
               <div class="metric-label">위험도 스코어</div>
               <div
                 class="metric-value"
-                :style="{ color: RISK_CONFIG[selectedEquipment.riskLevel].color }"
-              >{{ selectedEquipment.riskScore.toFixed(2) }}</div>
+                :style="{ color: getRiskConfig(selectedEquipment.riskLevel).color }"
+              >{{ selectedEquipment.riskScore != null ? selectedEquipment.riskScore.toFixed(2) : 'N/A' }}</div>
             </div>
           </div>
 
@@ -162,9 +154,9 @@
                 <span
                   class="rul-grade-badge"
                   :style="{
-                    color: RISK_CONFIG[rulResult.grade].color,
-                    background: RISK_CONFIG[rulResult.grade].bg,
-                    borderColor: RISK_CONFIG[rulResult.grade].color + '50'
+                    color: getRiskConfig(rulResult.grade).color,
+                    background: getRiskConfig(rulResult.grade).bg,
+                    borderColor: getRiskConfig(rulResult.grade).color + '50'
                   }"
                 >{{ rulResult.grade }}</span>
                 <span class="rul-days">잔여 수명 약 <strong>{{ rulResult.rul }}</strong>일</span>
@@ -194,32 +186,33 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, watch, onBeforeUnmount } from 'vue'
+import { ref, computed, nextTick, watch, onBeforeUnmount, onMounted } from 'vue'
 import Chart from 'chart.js/auto'
+import api from '../api'
+import { getRiskConfig, getStatusConfig, formatRul, getRulColor, RISK_FILTER_OPTIONS, STATUS_FILTER_OPTIONS } from '../constants/predictive'
 
-// ── Mock 데이터 ──────────────────────────────────────────────
-const MOCK_EQUIPMENTS = [
-  { id: 1, name: 'CAM01', riskLevel: 'LOW',      rul: 312, status: 'OPERATIONAL', motorCurrent: 15.2, vibration: 1.2, temperature: 45, riskScore: 0.12, lastInspection: '2026.03.15', installDate: '2023.06.15' },
-  { id: 2, name: 'CAM02', riskLevel: 'LOW',      rul: 305, status: 'OPERATIONAL', motorCurrent: 14.8, vibration: 1.5, temperature: 43, riskScore: 0.15, lastInspection: '2026.03.14', installDate: '2023.07.20' },
-  { id: 3, name: 'CAM03', riskLevel: 'MEDIUM',   rul: 150, status: 'REQUESTED',   motorCurrent: 18.5, vibration: 3.2, temperature: 62, riskScore: 0.45, lastInspection: '2026.03.12', installDate: '2022.11.10' },
-  { id: 4, name: 'CAM04', riskLevel: 'MEDIUM',   rul: 120, status: 'IN_PROGRESS', motorCurrent: 19.1, vibration: 4.0, temperature: 68, riskScore: 0.52, lastInspection: '2026.03.10', installDate: '2022.08.05' },
-  { id: 5, name: 'CAM05', riskLevel: 'HIGH',     rul: 30,  status: 'REQUIRED',    motorCurrent: 24.5, vibration: 5.8, temperature: 78, riskScore: 0.74, lastInspection: '2026.03.08', installDate: '2021.12.20' },
-  { id: 6, name: 'CAM06', riskLevel: 'CRITICAL', rul: 3,   status: 'REQUIRED',    motorCurrent: 32.1, vibration: 8.5, temperature: 95, riskScore: 0.93, lastInspection: '2026.03.05', installDate: '2021.03.15' },
-]
+// ── 서버 데이터 ───────────────────────────────────────────────
+const equipments = ref([])
+const loading    = ref(false)
+const loadError  = ref(null)
 
-// ── 색상 설정 ─────────────────────────────────────────────────
-const RISK_CONFIG = {
-  LOW:      { label: '정상', color: '#10B981', bg: 'rgba(16,185,129,0.15)' },
-  MEDIUM:   { label: '주의', color: '#FBBF24', bg: 'rgba(251,191,36,0.15)' },
-  HIGH:     { label: '경고', color: '#F59E0B', bg: 'rgba(245,158,11,0.15)' },
-  CRITICAL: { label: '위험', color: '#EF4444', bg: 'rgba(239,68,68,0.15)'  },
-}
-
-const STATUS_CONFIG = {
-  OPERATIONAL: { label: '정상가능', color: '#10B981', bg: 'rgba(16,185,129,0.15)' },
-  REQUESTED:   { label: '점검요청', color: '#FBBF24', bg: 'rgba(251,191,36,0.15)' },
-  IN_PROGRESS: { label: '점검중',   color: '#1A6DCC', bg: 'rgba(26,109,204,0.15)'  },
-  REQUIRED:    { label: '점검요망', color: '#EF4444', bg: 'rgba(239,68,68,0.15)'   },
+async function fetchEquipments() {
+  loading.value = true
+  loadError.value = null
+  try {
+    const res = await api.get('/predictive/equipments')
+    if (res.data?.success) {
+      equipments.value = res.data.data || []
+    } else {
+      loadError.value = res.data?.message || '장비 목록 조회 실패'
+      equipments.value = []
+    }
+  } catch (e) {
+    loadError.value = e.response?.data?.message || e.message || '네트워크 오류'
+    equipments.value = []
+  } finally {
+    loading.value = false
+  }
 }
 
 // ── 상태 ─────────────────────────────────────────────────────
@@ -235,52 +228,40 @@ let chartVibration = null
 
 // ── computed ─────────────────────────────────────────────────
 const filteredEquipments = computed(() => {
-  return MOCK_EQUIPMENTS.filter(eq => {
+  return equipments.value.filter(eq => {
     const riskOk   = !riskFilter.value   || eq.riskLevel === riskFilter.value
     const statusOk = !statusFilter.value || eq.status    === statusFilter.value
     return riskOk && statusOk
   })
 })
 
-// ── 유틸 함수 ─────────────────────────────────────────────────
-function formatRul(rul) {
-  if (rul <= 3)   return '3일 이내'
-  if (rul <= 30)  return `약 ${rul}일`
-  if (rul <= 180) return `약 ${rul}일`
-  return '300일 이상'
-}
+// ── 센서 이력 조회 ────────────────────────────────────────────
+const sensorHistory = ref([])
 
-function getRulColor(rul) {
-  if (rul <= 3)   return '#EF4444'
-  if (rul <= 30)  return '#F59E0B'
-  if (rul <= 180) return '#FBBF24'
-  return '#10B981'
-}
-
-function generateTimeSeries(baseValue, points = 12) {
-  return Array.from({ length: points }, () => {
-    const noise = (Math.random() - 0.5) * 0.2 * baseValue
-    return parseFloat((baseValue + noise).toFixed(2))
-  })
-}
-
-function getTimeLabels(points = 12) {
-  const labels = []
-  const now = new Date()
-  for (let i = points - 1; i >= 0; i--) {
-    const d = new Date(now.getTime() - i * 60 * 60 * 1000)
-    labels.push(d.getHours().toString().padStart(2, '0') + ':00')
+async function fetchSensorHistory(equipmentId) {
+  try {
+    const res = await api.get(`/predictive/equipments/${equipmentId}/sensor-history?hours=12`)
+    sensorHistory.value = res.data?.success ? (res.data.data || []) : []
+  } catch (e) {
+    sensorHistory.value = []
   }
-  return labels
 }
 
 // ── 차트 ─────────────────────────────────────────────────────
-function initCharts() {
+async function initCharts() {
   if (!selectedEquipment.value) return
   const eq = selectedEquipment.value
-  const labels = getTimeLabels(12)
 
-  // 모터전류 차트
+  await fetchSensorHistory(eq.id)
+  const history = sensorHistory.value
+
+  if (history.length === 0) return
+
+  const labels = history.map(d => {
+    const t = String(d.recorded_at || d.recordedAt || '')
+    return t.substring(11, 16)
+  })
+
   if (chartMotorRef.value) {
     chartMotor = new Chart(chartMotorRef.value, {
       type: 'line',
@@ -288,13 +269,13 @@ function initCharts() {
         labels,
         datasets: [{
           label: '모터 전류 (A)',
-          data: generateTimeSeries(eq.motorCurrent),
+          data: history.map(d => d.motor_current ?? d.motorCurrent),
           borderColor: '#1A6DCC',
           backgroundColor: 'rgba(26,109,204,0.12)',
           borderWidth: 2,
           fill: true,
           tension: 0.4,
-          pointRadius: 3,
+          pointRadius: 2,
           pointBackgroundColor: '#1A6DCC',
         }],
       },
@@ -302,7 +283,6 @@ function initCharts() {
     })
   }
 
-  // 베어링진동 차트
   if (chartVibrationRef.value) {
     chartVibration = new Chart(chartVibrationRef.value, {
       type: 'line',
@@ -310,13 +290,13 @@ function initCharts() {
         labels,
         datasets: [{
           label: '베어링 진동 (m/s²)',
-          data: generateTimeSeries(eq.vibration),
+          data: history.map(d => d.vibration),
           borderColor: '#F59E0B',
           backgroundColor: 'rgba(245,158,11,0.12)',
           borderWidth: 2,
           fill: true,
           tension: 0.4,
-          pointRadius: 3,
+          pointRadius: 2,
           pointBackgroundColor: '#F59E0B',
         }],
       },
@@ -374,17 +354,37 @@ function closePanel() {
   rulPredicting.value = false
 }
 
-function predictRul() {
+async function predictRul() {
   if (rulPredicting.value || !selectedEquipment.value) return
   rulPredicting.value = true
   rulResult.value = null
-  setTimeout(() => {
-    rulPredicting.value = false
-    rulResult.value = {
-      grade: selectedEquipment.value.riskLevel,
-      rul:   selectedEquipment.value.rul,
+  try {
+    const eq = selectedEquipment.value
+    const res = await api.post('/predictive/predict', {
+      items: [{
+        equipmentId: eq.id,
+        vibration: eq.vibration ?? 0,
+        temperature: eq.temperature ?? 0,
+        motorCurrent: eq.motorCurrent ?? 0,
+      }]
+    })
+    if (res.data?.success && res.data.data?.length > 0) {
+      const pred = res.data.data[0]
+      rulResult.value = {
+        grade: pred.risk_level || pred.riskLevel || eq.riskLevel,
+        rul: eq.rul,
+      }
+    } else {
+      rulResult.value = { grade: eq.riskLevel, rul: eq.rul }
     }
-  }, 2000)
+  } catch (e) {
+    rulResult.value = {
+      grade: selectedEquipment.value?.riskLevel || 'LOW',
+      rul: selectedEquipment.value?.rul || 0,
+    }
+  } finally {
+    rulPredicting.value = false
+  }
 }
 
 // ── watch ─────────────────────────────────────────────────────
@@ -392,8 +392,13 @@ watch(selectedEquipment, async (eq) => {
   destroyCharts()
   if (eq) {
     await nextTick()
-    initCharts()
+    await initCharts()
   }
+})
+
+// ── lifecycle ────────────────────────────────────────────────
+onMounted(() => {
+  fetchEquipments()
 })
 
 onBeforeUnmount(() => destroyCharts())

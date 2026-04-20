@@ -1,0 +1,25 @@
+{
+  "sklearn": "1.8.0",
+  "xgboost": "3.2.0",
+  "python": "3.11.14 | packaged by Anaconda, Inc. | (main, Oct 21 2025, 18:30:03) [MSC v.1929 64 bit (AMD64)]",
+  "trained_at": "2026-04-15T16:23:47.905212",
+  "random_state": 42,
+  "task": "anomaly_binary",
+  "best_model": "xgb",
+  "best_params": {
+    "n_estimators": 264,
+    "max_depth": 7,
+    "learning_rate": 0.016858880610843497,
+    "reg_lambda": 7.089269985852983,
+    "min_child_weight": 9,
+    "subsample": 0.7023081796996598,
+    "colsample_bytree": 0.9009721803757055,
+    "scale_pos_weight": 2.1537421167893824
+  },
+  "n_rows": 221880,
+  "features": [
+    "vibration",
+    "temperature",
+    "motor_current"
+  ]
+}
