@@ -14,6 +14,7 @@ public interface SensorLogMapper {
 
     List<Map<String, Object>> selectHistory(
             @Param("equipmentId") Long equipmentId,
-            @Param("hours") int hours
+            @Param("hours") int hours,
+            @Param("interval") int interval
     );
 }

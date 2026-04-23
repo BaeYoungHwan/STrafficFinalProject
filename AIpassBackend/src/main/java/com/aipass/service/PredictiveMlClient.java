@@ -28,6 +28,7 @@ public class PredictiveMlClient {
 
     private final RestTemplate restTemplate;
     private final String predictUrl;
+    private final String baseUrl;
     private final boolean fallbackEnabled;
 
     public PredictiveMlClient(
@@ -37,6 +38,7 @@ public class PredictiveMlClient {
             @Value("${predictive.ml.fallback-enabled:true}") boolean fallbackEnabled
     ) {
         this.restTemplate = restTemplate;
+        this.baseUrl = baseUrl;
         this.predictUrl = baseUrl + predictPath;
         this.fallbackEnabled = fallbackEnabled;
     }
@@ -118,5 +120,23 @@ public class PredictiveMlClient {
         pi.setFaultType(anomaly ? "UNKNOWN" : "NORMAL");
         pi.setRiskLevel(risk);
         return pi;
+    }
+
+    public boolean resetEquipment(Long equipmentId) {
+        try {
+            String resetUrl = baseUrl + "/api/v1/predict/simulator/reset/" + equipmentId;
+            ResponseEntity<Map> resp = restTemplate.postForEntity(resetUrl, null, Map.class);
+            if (resp.getStatusCode().is2xxSuccessful() && resp.getBody() != null) {
+                boolean success = Boolean.TRUE.equals(resp.getBody().get("success"));
+                if (success) {
+                    logger.info("[MlClient] 시뮬레이터 장비 {} 리셋 성공", equipmentId);
+                }
+                return success;
+            }
+            return false;
+        } catch (Exception e) {
+            logger.warn("[MlClient] 시뮬레이터 리셋 실패 eq_id={}: {}", equipmentId, e.getMessage());
+            return false;
+        }
     }
 }

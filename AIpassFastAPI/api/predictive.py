@@ -13,6 +13,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from services.predictive.judge import judge
+from services.predictive.scheduler import reset_equipment
 
 logger = logging.getLogger(__name__)
 
@@ -87,3 +88,15 @@ async def predict(body: PredictRequest) -> PredictResponse:
         data=results,
         message=f"{len(results)}건 판정 완료",
     )
+
+
+@router.post("/simulator/reset/{equipment_id}", summary="시뮬레이터 장비 상태 리셋")
+async def reset_simulator_equipment(equipment_id: int) -> dict:
+    if not (1 <= equipment_id <= 12):
+        return {"success": False, "message": f"유효하지 않은 equipment_id: {equipment_id}"}
+
+    if reset_equipment(equipment_id):
+        logger.info("[Predict] 시뮬레이터 장비 %d 리셋 완료", equipment_id)
+        return {"success": True, "message": f"장비 {equipment_id} 리셋 완료"}
+    else:
+        return {"success": False, "message": "시뮬레이터 미실행 또는 장비 없음"}
