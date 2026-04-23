@@ -7,7 +7,13 @@
     <update id="updateRiskAndFault">
         UPDATE equipment
         SET risk_level = #{riskLevel},
-            fault_type = #{faultType}
+            fault_type = #{faultType},
+            status = CASE
+                WHEN #{riskLevel} = 'CRITICAL' THEN '점검요망'
+                WHEN #{riskLevel} = 'HIGH'     THEN '점검요청'
+                WHEN #{riskLevel} = 'MEDIUM'   THEN '점검요청'
+                ELSE '정상가동'
+            END
         WHERE equipment_id = #{equipmentId}
     </update>
 

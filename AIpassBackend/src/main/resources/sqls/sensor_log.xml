@@ -23,7 +23,7 @@
     <select id="selectHistory" resultType="map">
         SELECT
             date_trunc('minute', recorded_at)
-                - (EXTRACT(MINUTE FROM recorded_at)::int % 5) * INTERVAL '1 minute' AS recorded_at,
+                - (EXTRACT(MINUTE FROM recorded_at)::int % #{interval}) * INTERVAL '1 minute' AS recorded_at,
             ROUND(AVG(motor_current)::numeric, 2)  AS motor_current,
             ROUND(AVG(vibration)::numeric, 3)      AS vibration,
             ROUND(AVG(temperature)::numeric, 1)    AS temperature

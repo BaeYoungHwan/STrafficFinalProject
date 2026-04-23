@@ -57,6 +57,12 @@ const routes = [
         component: () => import('../views/PredictiveView.vue')
       },
       {
+        path: 'predictive/:id',
+        name: 'PredictiveDetail',
+        component: () => import('../views/PredictiveDetailView.vue'),
+        props: true
+      },
+      {
         path: 'statistics',
         name: 'Statistics',
         component: () => import('../views/StatisticsView.vue')

@@ -94,10 +94,9 @@
         </div>
       </div>
 
-      <!-- 상세 패널 -->
+      <!-- 요약 패널 -->
       <transition name="panel-slide">
         <div v-if="selectedEquipment" class="detail-panel">
-          <!-- 패널 헤더 -->
           <div class="panel-header">
             <div class="panel-title-area">
               <span class="panel-equipment-name">{{ selectedEquipment.name }}</span>
@@ -113,83 +112,48 @@
             <button class="close-btn" @click="closePanel">×</button>
           </div>
 
-          <div class="panel-install-date">설치일: {{ selectedEquipment.installDate }}</div>
-
-          <!-- 메트릭 카드 4개 -->
-          <div class="metric-grid">
-            <div class="metric-card">
-              <div class="metric-label">모터 전류</div>
-              <div class="metric-value">{{ selectedEquipment.motorCurrent }} <span class="metric-unit">A</span></div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-label">베어링 진동</div>
-              <div class="metric-value">{{ selectedEquipment.vibration }} <span class="metric-unit">m/s²</span></div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-label">온도</div>
-              <div class="metric-value">{{ selectedEquipment.temperature }} <span class="metric-unit">°C</span></div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-label">위험도 스코어</div>
-              <div
-                class="metric-value"
-                :style="{ color: getRiskConfig(selectedEquipment.riskLevel).color }"
-              >{{ selectedEquipment.riskScore != null ? selectedEquipment.riskScore.toFixed(2) : 'N/A' }}</div>
-            </div>
+          <div class="info-table-wrap">
+            <table class="info-table">
+              <tbody>
+                <tr><th>모터 전류</th><td>{{ selectedEquipment.motorCurrent ?? '-' }} A</td></tr>
+                <tr><th>베어링 진동</th><td>{{ selectedEquipment.vibration ?? '-' }} m/s²</td></tr>
+                <tr><th>온도</th><td>{{ selectedEquipment.temperature ?? '-' }} °C</td></tr>
+                <tr>
+                  <th>위험도</th>
+                  <td>
+                    <span class="risk-badge" :style="{ color: getRiskConfig(selectedEquipment.riskLevel).color, background: getRiskConfig(selectedEquipment.riskLevel).bg }">
+                      <span class="risk-dot" :style="{ background: getRiskConfig(selectedEquipment.riskLevel).color }"></span>
+                      {{ getRiskConfig(selectedEquipment.riskLevel).label }}
+                    </span>
+                  </td>
+                </tr>
+                <tr>
+                  <th>잔여 수명</th>
+                  <td :style="{ color: getRulColor(selectedEquipment.rul), fontWeight: 700 }">{{ formatRul(selectedEquipment.rul) }}</td>
+                </tr>
+                <tr><th>최근 점검일</th><td>{{ selectedEquipment.lastInspection ?? '-' }}</td></tr>
+              </tbody>
+            </table>
           </div>
 
-          <!-- RUL 예측 섹션 -->
-          <div class="rul-section">
-            <button
-              class="predict-btn"
-              :disabled="rulPredicting"
-              @click="predictRul"
-            >
-              <span class="predict-icon">⚡</span>
-              {{ rulPredicting ? 'AI 분석 중...' : 'AI 잔여수명 예측' }}
-            </button>
-
-            <transition name="fade">
-              <div v-if="rulResult" class="rul-result">
-                <span
-                  class="rul-grade-badge"
-                  :style="{
-                    color: getRiskConfig(rulResult.grade).color,
-                    background: getRiskConfig(rulResult.grade).bg,
-                    borderColor: getRiskConfig(rulResult.grade).color + '50'
-                  }"
-                >{{ rulResult.grade }}</span>
-                <span class="rul-days">잔여 수명 약 <strong>{{ rulResult.rul }}</strong>일</span>
-              </div>
-            </transition>
-          </div>
-
-          <!-- 모터전류 차트 -->
-          <div class="chart-section">
-            <div class="chart-title">모터전류 추이 (A)</div>
-            <div class="chart-card">
-              <canvas ref="chartMotorRef"></canvas>
-            </div>
-          </div>
-
-          <!-- 베어링진동 차트 -->
-          <div class="chart-section">
-            <div class="chart-title">베어링진동 추이 (m/s²)</div>
-            <div class="chart-card">
-              <canvas ref="chartVibrationRef"></canvas>
-            </div>
-          </div>
+          <button class="detail-link-btn" @click="goToDetail">
+            상세보기
+            <span class="arrow">→</span>
+          </button>
         </div>
       </transition>
     </div>
+
   </div>
 </template>
 
 <script setup>
-import { ref, computed, nextTick, watch, onBeforeUnmount, onMounted } from 'vue'
-import Chart from 'chart.js/auto'
+import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import api from '../api'
 import { getRiskConfig, getStatusConfig, formatRul, getRulColor, RISK_FILTER_OPTIONS, STATUS_FILTER_OPTIONS } from '../constants/predictive'
+
+const router = useRouter()
 
 // ── 서버 데이터 ───────────────────────────────────────────────
 const equipments = ref([])
@@ -219,12 +183,6 @@ async function fetchEquipments() {
 const riskFilter   = ref('')
 const statusFilter = ref('')
 const selectedEquipment = ref(null)
-const rulPredicting = ref(false)
-const rulResult     = ref(null)
-const chartMotorRef     = ref(null)
-const chartVibrationRef = ref(null)
-let chartMotor     = null
-let chartVibration = null
 
 // ── computed ─────────────────────────────────────────────────
 const filteredEquipments = computed(() => {
@@ -235,173 +193,24 @@ const filteredEquipments = computed(() => {
   })
 })
 
-// ── 센서 이력 조회 ────────────────────────────────────────────
-const sensorHistory = ref([])
-
-async function fetchSensorHistory(equipmentId) {
-  try {
-    const res = await api.get(`/predictive/equipments/${equipmentId}/sensor-history?hours=12`)
-    sensorHistory.value = res.data?.success ? (res.data.data || []) : []
-  } catch (e) {
-    sensorHistory.value = []
-  }
-}
-
-// ── 차트 ─────────────────────────────────────────────────────
-async function initCharts() {
-  if (!selectedEquipment.value) return
-  const eq = selectedEquipment.value
-
-  await fetchSensorHistory(eq.id)
-  const history = sensorHistory.value
-
-  if (history.length === 0) return
-
-  const labels = history.map(d => {
-    const t = String(d.recorded_at || d.recordedAt || '')
-    return t.substring(11, 16)
-  })
-
-  if (chartMotorRef.value) {
-    chartMotor = new Chart(chartMotorRef.value, {
-      type: 'line',
-      data: {
-        labels,
-        datasets: [{
-          label: '모터 전류 (A)',
-          data: history.map(d => d.motor_current ?? d.motorCurrent),
-          borderColor: '#1A6DCC',
-          backgroundColor: 'rgba(26,109,204,0.12)',
-          borderWidth: 2,
-          fill: true,
-          tension: 0.4,
-          pointRadius: 2,
-          pointBackgroundColor: '#1A6DCC',
-        }],
-      },
-      options: chartOptions('A'),
-    })
-  }
-
-  if (chartVibrationRef.value) {
-    chartVibration = new Chart(chartVibrationRef.value, {
-      type: 'line',
-      data: {
-        labels,
-        datasets: [{
-          label: '베어링 진동 (m/s²)',
-          data: history.map(d => d.vibration),
-          borderColor: '#F59E0B',
-          backgroundColor: 'rgba(245,158,11,0.12)',
-          borderWidth: 2,
-          fill: true,
-          tension: 0.4,
-          pointRadius: 2,
-          pointBackgroundColor: '#F59E0B',
-        }],
-      },
-      options: chartOptions('m/s²'),
-    })
-  }
-}
-
-function chartOptions(unit) {
-  return {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: { display: false },
-      tooltip: {
-        backgroundColor: '#1E2140',
-        titleColor: '#9CA3AF',
-        bodyColor: '#F3F4F6',
-        callbacks: {
-          label: ctx => ` ${ctx.parsed.y} ${unit}`,
-        },
-      },
-    },
-    scales: {
-      x: {
-        ticks: { color: '#9CA3AF', font: { size: 11 } },
-        grid:  { color: 'rgba(255,255,255,0.06)' },
-      },
-      y: {
-        ticks: { color: '#9CA3AF', font: { size: 11 } },
-        grid:  { color: 'rgba(255,255,255,0.06)' },
-      },
-    },
-  }
-}
-
-function destroyCharts() {
-  chartMotor?.destroy()
-  chartMotor = null
-  chartVibration?.destroy()
-  chartVibration = null
-}
-
 // ── 메서드 ────────────────────────────────────────────────────
 function selectEquipment(eq) {
-  rulResult.value = null
-  rulPredicting.value = false
   selectedEquipment.value = eq
 }
 
 function closePanel() {
-  destroyCharts()
   selectedEquipment.value = null
-  rulResult.value = null
-  rulPredicting.value = false
 }
 
-async function predictRul() {
-  if (rulPredicting.value || !selectedEquipment.value) return
-  rulPredicting.value = true
-  rulResult.value = null
-  try {
-    const eq = selectedEquipment.value
-    const res = await api.post('/predictive/predict', {
-      items: [{
-        equipmentId: eq.id,
-        vibration: eq.vibration ?? 0,
-        temperature: eq.temperature ?? 0,
-        motorCurrent: eq.motorCurrent ?? 0,
-      }]
-    })
-    if (res.data?.success && res.data.data?.length > 0) {
-      const pred = res.data.data[0]
-      rulResult.value = {
-        grade: pred.risk_level || pred.riskLevel || eq.riskLevel,
-        rul: eq.rul,
-      }
-    } else {
-      rulResult.value = { grade: eq.riskLevel, rul: eq.rul }
-    }
-  } catch (e) {
-    rulResult.value = {
-      grade: selectedEquipment.value?.riskLevel || 'LOW',
-      rul: selectedEquipment.value?.rul || 0,
-    }
-  } finally {
-    rulPredicting.value = false
-  }
+function goToDetail() {
+  if (!selectedEquipment.value) return
+  router.push(`/predictive/${selectedEquipment.value.id}`)
 }
-
-// ── watch ─────────────────────────────────────────────────────
-watch(selectedEquipment, async (eq) => {
-  destroyCharts()
-  if (eq) {
-    await nextTick()
-    await initCharts()
-  }
-})
 
 // ── lifecycle ────────────────────────────────────────────────
 onMounted(() => {
   fetchEquipments()
 })
-
-onBeforeUnmount(() => destroyCharts())
 </script>
 
 <style scoped>
@@ -714,46 +523,37 @@ onBeforeUnmount(() => destroyCharts())
   border-color: #EF4444;
 }
 
-.panel-install-date {
-  font-size: 12.5px;
-  color: #6B7280;
-  margin-bottom: 20px;
-}
+/* (설치일 → 정보 테이블 내 행으로 이동됨) */
 
-/* ── 메트릭 카드 그리드 ───────────────────────────────────── */
-.metric-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin-bottom: 24px;
+/* ── 상세보기 버튼 ───────────────────────────────────────── */
+.detail-link-btn {
+  width: 100%;
+  padding: 14px;
+  margin-top: 16px;
+  background: linear-gradient(135deg, #1A6DCC, #0F4E9E);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.2s;
 }
-
-.metric-card {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  padding: 14px 16px;
+.detail-link-btn:hover {
+  background: linear-gradient(135deg, #2278DC, #1A6DCC);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(26, 109, 204, 0.35);
 }
-
-.metric-label {
-  font-size: 11.5px;
-  color: #9CA3AF;
-  margin-bottom: 6px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+.detail-link-btn .arrow {
+  font-size: 16px;
+  transition: transform 0.2s;
 }
-
-.metric-value {
-  font-size: 22px;
-  font-weight: 700;
-  color: #F9FAFB;
-  line-height: 1;
-}
-
-.metric-unit {
-  font-size: 13px;
-  font-weight: 400;
-  color: #9CA3AF;
+.detail-link-btn:hover .arrow {
+  transform: translateX(4px);
 }
 
 /* ── RUL 예측 섹션 ────────────────────────────────────────── */
@@ -847,5 +647,161 @@ onBeforeUnmount(() => destroyCharts())
 .chart-card canvas {
   width: 100% !important;
   height: 100% !important;
+}
+
+/* ── 장비 정보 테이블 ────────────────────────────────────── */
+.info-table-wrap {
+  margin-bottom: 20px;
+}
+
+.info-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.info-table th {
+  text-align: left;
+  padding: 10px 14px;
+  color: #9CA3AF;
+  font-weight: 500;
+  width: 110px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  white-space: nowrap;
+}
+
+.info-table td {
+  padding: 10px 14px;
+  color: #F3F4F6;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.info-table tr:last-child th,
+.info-table tr:last-child td {
+  border-bottom: none;
+}
+
+/* ── 액션 버튼 ───────────────────────────────────────────── */
+.panel-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.action-btn {
+  flex: 1;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #E5E7EB;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.2s;
+}
+
+.action-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.25);
+  transform: translateY(-1px);
+}
+
+.action-history:hover {
+  border-color: #1A6DCC;
+  color: #93C5FD;
+}
+
+.action-alert:hover {
+  border-color: #F59E0B;
+  color: #FCD34D;
+}
+
+/* ── 모달 ────────────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-card {
+  background: #fff;
+  border-radius: 16px;
+  width: 600px;
+  max-width: 90vw;
+  max-height: 80vh;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+  border-bottom: 1px solid #E5E7EB;
+}
+
+.modal-header .close-btn {
+  background: #F3F4F6;
+  border: 1px solid #E5E7EB;
+  color: #6B7280;
+}
+.modal-header .close-btn:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: #EF4444;
+  border-color: #EF4444;
+}
+
+.modal-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #1A1A2E;
+  margin: 0;
+}
+
+.modal-body {
+  padding: 20px 24px;
+  overflow-y: auto;
+}
+
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.history-table th {
+  padding: 10px 12px;
+  text-align: left;
+  font-weight: 600;
+  color: #6B7280;
+  font-size: 12px;
+  border-bottom: 2px solid #E5E7EB;
+  white-space: nowrap;
+}
+
+.history-table td {
+  padding: 10px 12px;
+  color: #374151;
+  border-bottom: 1px solid #F3F4F6;
+}
+
+.empty-history {
+  text-align: center;
+  padding: 40px 0;
+  color: #9CA3AF;
+  font-size: 14px;
 }
 </style>
