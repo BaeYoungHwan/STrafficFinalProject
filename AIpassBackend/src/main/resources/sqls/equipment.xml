@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.aipass.dao.EquipmentMapper">
+
+    <update id="updateRiskAndFault">
+        UPDATE equipment
+        SET risk_level = #{riskLevel},
+            fault_type = #{faultType}
+        WHERE equipment_id = #{equipmentId}
+    </update>
+
+    <update id="resolveEquipment">
+        UPDATE equipment
+        SET risk_level = 'LOW',
+            fault_type = 'NORMAL',
+            status     = '정상가동'
+        WHERE equipment_id = #{equipmentId}
+    </update>
+
+</mapper>
