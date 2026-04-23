@@ -1,13 +1,21 @@
 package com.aipass.controller;
 
+import com.aipass.dao.EquipmentMapper;
+import com.aipass.dao.SensorLogMapper;
+import com.aipass.dto.EquipmentDashboardDTO;
+import com.aipass.dto.SensorIngestRequest;
+import com.aipass.service.EquipmentDashboardService;
+import com.aipass.service.EquipmentStateMachineService;
+import com.aipass.service.PredictiveMlClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.*;
-import java.util.stream.Collectors;
-import java.util.Objects;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/predictive")
@@ -15,161 +23,192 @@ public class PredictiveController {
 
     private static final Logger logger = LoggerFactory.getLogger(PredictiveController.class);
 
-    // ───────────────────────────────────────────────────────────────────
-    // 더미 데이터 (하드코딩)
-    // ───────────────────────────────────────────────────────────────────
-    private static final List<Map<String, Object>> DUMMY_EQUIPMENTS = new ArrayList<>();
+    private final EquipmentDashboardService dashboardService;
+    private final EquipmentMapper equipmentMapper;
+    private final EquipmentStateMachineService stateMachine;
+    private final SensorLogMapper sensorLogMapper;
+    private final PredictiveMlClient mlClient;
+    private final JdbcTemplate jdbcTemplate;
 
-    static {
-        Object[][] raw = {
-            // equipmentId, equipmentName, intersectionName, motorCurrent, bearingVibration, temperature, healthIndex, rul, riskLevel, status, lastInspectionDate, installationDate, isAnomaly, anomalyScore
-            {1,  "CAM01", "강화대교",          15.2, 0.45, 42.5, 0.92, 365, "LOW",      "정상가동", "2026-03-15", "2023-01-10", false, 0.05},
-            {2,  "CAM02", "용정리",            15.5, 0.50, 43.0, 0.88, 320, "LOW",      "정상가동", "2026-03-10", "2023-02-15", false, 0.08},
-            {3,  "CAM03", "옥림교차로",        16.1, 0.65, 44.2, 0.78, 250, "LOW",      "정상가동", "2026-03-08", "2023-01-20", false, 0.12},
-            {4,  "CAM04", "대산교차로",        17.8, 1.10, 48.5, 0.55, 120, "MEDIUM",   "정상가동", "2026-02-20", "2022-11-05", false, 0.38},
-            {5,  "CAM05", "신당교차로",        18.5, 1.30, 50.0, 0.48,  85, "MEDIUM",   "정상가동", "2026-02-15", "2022-10-12", false, 0.45},
-            {6,  "CAM06", "하도교",            16.0, 0.60, 43.8, 0.82, 280, "LOW",      "정상가동", "2026-03-12", "2023-03-01", false, 0.10},
-            {7,  "CAM07", "부근교차로",        19.5, 1.80, 52.0, 0.35,  45, "HIGH",     "정상가동", "2026-01-25", "2022-08-20", true,  0.68},
-            {8,  "CAM08", "하점교차로",        22.3, 1.80, 58.5, 0.28,  25, "HIGH",     "점검중",   "2026-03-20", "2022-06-15", true,  0.75},
-            {9,  "CAM09", "이강교차로",        16.5, 0.70, 45.0, 0.75, 220, "LOW",      "정상가동", "2026-03-05", "2023-01-30", false, 0.15},
-            {10, "CAM10", "소방심신휴센터",    45.1, 8.20, 88.0, 0.08,   2, "CRITICAL", "점검요망", "2026-03-25", "2021-12-10", true,  0.95},
-            {11, "CAM11", "송산삼거리",        null, null, null, null, null, null,       "통신오류", "2026-02-28", "2022-09-05", false, null},
-            {12, "CAM12", "인화삼거리",        15.8, 0.55, 43.5, 0.85, 300, "LOW",      "정상가동", "2026-03-01", "2023-02-28", false, 0.07},
-        };
-
-        for (Object[] r : raw) {
-            Map<String, Object> eq = new LinkedHashMap<>();
-            eq.put("equipmentId",       r[0]);
-            eq.put("equipmentName",     r[1]);
-            eq.put("intersectionName",  r[2]);
-            eq.put("motorCurrent",      r[3]);
-            eq.put("bearingVibration",  r[4]);
-            eq.put("temperature",       r[5]);
-            eq.put("healthIndex",       r[6]);
-            eq.put("rul",               r[7]);
-            eq.put("riskLevel",         r[8]);
-            eq.put("status",            r[9]);
-            eq.put("lastInspectionDate",r[10]);
-            eq.put("installationDate",  r[11]);
-            eq.put("isAnomaly",         r[12]);
-            eq.put("anomalyScore",      r[13]);
-            DUMMY_EQUIPMENTS.add(eq);
-        }
+    public PredictiveController(EquipmentDashboardService dashboardService,
+                                EquipmentMapper equipmentMapper,
+                                EquipmentStateMachineService stateMachine,
+                                SensorLogMapper sensorLogMapper,
+                                PredictiveMlClient mlClient,
+                                JdbcTemplate jdbcTemplate) {
+        this.dashboardService = dashboardService;
+        this.equipmentMapper = equipmentMapper;
+        this.stateMachine = stateMachine;
+        this.sensorLogMapper = sensorLogMapper;
+        this.mlClient = mlClient;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
-    // ───────────────────────────────────────────────────────────────────
-    // API 1: 장비 목록 조회 (필터 + 페이지네이션)
-    // GET /api/predictive/equipments
-    // ───────────────────────────────────────────────────────────────────
+    /**
+     * GET /api/predictive/equipments
+     * 전체 장비 목록 (필터/페이지네이션은 프론트에서 처리).
+     */
     @GetMapping("/equipments")
-    public ResponseEntity<Map<String, Object>> getEquipments(
-            @RequestParam(value = "equipment", required = false) String equipment,
-            @RequestParam(value = "riskLevel",  required = false) String riskLevel,
-            @RequestParam(value = "status",     required = false) String status,
-            @RequestParam(value = "page",       defaultValue = "1")  int page,
-            @RequestParam(value = "size",       defaultValue = "20") int size
-    ) {
+    public ResponseEntity<Map<String, Object>> getEquipments() {
+        Map<String, Object> result = new LinkedHashMap<>();
         try {
-            // 목록 응답용 필드만 추출 (상세 전용 필드 제외)
-            List<Map<String, Object>> listFields = DUMMY_EQUIPMENTS.stream()
-                    .map(eq -> {
-                        Map<String, Object> item = new LinkedHashMap<>();
-                        item.put("equipmentId",       eq.get("equipmentId"));
-                        item.put("equipmentName",     eq.get("equipmentName"));
-                        item.put("intersectionName",  eq.get("intersectionName"));
-                        item.put("motorCurrent",      eq.get("motorCurrent"));
-                        item.put("bearingVibration",  eq.get("bearingVibration"));
-                        item.put("temperature",       eq.get("temperature"));
-                        item.put("healthIndex",       eq.get("healthIndex"));
-                        item.put("rul",               eq.get("rul"));
-                        item.put("riskLevel",         eq.get("riskLevel"));
-                        item.put("status",            eq.get("status"));
-                        item.put("lastInspectionDate",eq.get("lastInspectionDate"));
-                        return item;
-                    })
-                    .collect(Collectors.toList());
-
-            // 필터링
-            List<Map<String, Object>> filtered = listFields.stream()
-                    .filter(eq -> {
-                        if (equipment != null && !equipment.isEmpty()) {
-                            String name = String.valueOf(eq.get("equipmentName"));
-                            if (!name.toLowerCase().contains(equipment.toLowerCase())) return false;
-                        }
-                        if (riskLevel != null && !riskLevel.isEmpty()) {
-                            if (!Objects.equals(riskLevel, eq.get("riskLevel"))) return false;
-                        }
-                        if (status != null && !status.isEmpty()) {
-                            if (!Objects.equals(status, eq.get("status"))) return false;
-                        }
-                        return true;
-                    })
-                    .collect(Collectors.toList());
-
-            // 페이지네이션
-            int totalElements = filtered.size();
-            int totalPages    = (int) Math.ceil((double) totalElements / size);
-            int fromIndex     = Math.min((page - 1) * size, totalElements);
-            int toIndex       = Math.min(fromIndex + size, totalElements);
-            List<Map<String, Object>> pagedList = filtered.subList(fromIndex, toIndex);
-
-            Map<String, Object> pagination = new LinkedHashMap<>();
-            pagination.put("totalElements", totalElements);
-            pagination.put("totalPages",    totalPages);
-            pagination.put("currentPage",   page);
-            pagination.put("size",          size);
-
-            Map<String, Object> data = new LinkedHashMap<>();
-            data.put("equipments", pagedList);
-            data.put("pagination", pagination);
-
-            Map<String, Object> result = new LinkedHashMap<>();
+            List<EquipmentDashboardDTO> list = dashboardService.findAll();
             result.put("success", true);
-            result.put("data",    data);
+            result.put("data", list);
             result.put("message", "장비 목록 조회 성공");
             return ResponseEntity.ok(result);
-
         } catch (Exception e) {
-            logger.error("[getEquipments] 장비 목록 조회 실패: {}", e.getMessage(), e);
-            Map<String, Object> error = new LinkedHashMap<>();
-            error.put("success", false);
-            error.put("message", "장비 목록 조회 중 오류가 발생했습니다.");
-            return ResponseEntity.status(500).body(error);
+            logger.error("[PredictiveController.getEquipments] failed: {}", e.getMessage(), e);
+            result.put("success", false);
+            result.put("message", "장비 목록 조회 중 오류가 발생했습니다.");
+            return ResponseEntity.status(500).body(result);
         }
     }
 
-    // ───────────────────────────────────────────────────────────────────
-    // API 2: 장비 상세 조회
-    // GET /api/predictive/equipments/{equipmentId}
-    // ───────────────────────────────────────────────────────────────────
+    /**
+     * GET /api/predictive/equipments/{equipmentId}
+     * 단건 조회 (상세 패널용).
+     */
     @GetMapping("/equipments/{equipmentId}")
     public ResponseEntity<Map<String, Object>> getEquipmentDetail(
-            @PathVariable("equipmentId") int equipmentId
+            @PathVariable("equipmentId") Long equipmentId
     ) {
+        Map<String, Object> result = new LinkedHashMap<>();
         try {
-            Optional<Map<String, Object>> found = DUMMY_EQUIPMENTS.stream()
-                    .filter(eq -> equipmentId == (int) eq.get("equipmentId"))
-                    .findFirst();
-
-            if (found.isEmpty()) {
-                Map<String, Object> notFound = new LinkedHashMap<>();
-                notFound.put("success", false);
-                notFound.put("message", "해당 장비를 찾을 수 없습니다. equipmentId=" + equipmentId);
-                return ResponseEntity.status(404).body(notFound);
+            EquipmentDashboardDTO dto = dashboardService.findById(equipmentId);
+            if (dto == null) {
+                result.put("success", false);
+                result.put("message", "해당 장비를 찾을 수 없습니다. equipmentId=" + equipmentId);
+                return ResponseEntity.status(404).body(result);
             }
-
-            Map<String, Object> result = new LinkedHashMap<>();
             result.put("success", true);
-            result.put("data",    found.get());
+            result.put("data", dto);
             result.put("message", "장비 상세 조회 성공");
             return ResponseEntity.ok(result);
-
         } catch (Exception e) {
-            logger.error("[getEquipmentDetail] 장비 상세 조회 실패: equipmentId={}, {}", equipmentId, e.getMessage(), e);
-            Map<String, Object> error = new LinkedHashMap<>();
-            error.put("success", false);
-            error.put("message", "장비 상세 조회 중 오류가 발생했습니다.");
-            return ResponseEntity.status(500).body(error);
+            logger.error("[PredictiveController.getEquipmentDetail] equipmentId={} failed: {}",
+                    equipmentId, e.getMessage(), e);
+            result.put("success", false);
+            result.put("message", "장비 상세 조회 중 오류가 발생했습니다.");
+            return ResponseEntity.status(500).body(result);
+        }
+    }
+
+    /**
+     * POST /api/predictive/predict
+     * FE → BE → FastAPI ML 판정 프록시.
+     * FE는 camelCase로 전송, BE가 FastAPI snake_case로 변환.
+     */
+    @PostMapping("/predict")
+    public ResponseEntity<Map<String, Object>> predict(@RequestBody SensorIngestRequest request) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        try {
+            var predictions = mlClient.predict(request.getItems());
+            result.put("success", true);
+            result.put("data", predictions.values());
+            result.put("message", "ML 판정 성공");
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("[PredictiveController.predict] failed: {}", e.getMessage(), e);
+            result.put("success", false);
+            result.put("message", "ML 판정 중 오류: " + e.getMessage());
+            return ResponseEntity.status(500).body(result);
+        }
+    }
+
+    /**
+     * GET /api/predictive/equipments/{equipmentId}/sensor-history
+     * 센서 이력 조회 (기간별 평균 다운샘플링).
+     */
+    @GetMapping("/equipments/{equipmentId}/sensor-history")
+    public ResponseEntity<Map<String, Object>> getSensorHistory(
+            @PathVariable("equipmentId") Long equipmentId,
+            @RequestParam(value = "hours", defaultValue = "12") int hours
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        try {
+            if (hours < 1) hours = 1;
+            if (hours > 168) hours = 168;
+            int interval = hours <= 12 ? 10 : hours <= 24 ? 20 : 60;
+            List<Map<String, Object>> history = sensorLogMapper.selectHistory(equipmentId, hours, interval);
+            result.put("success", true);
+            result.put("data", history);
+            result.put("message", "센서 이력 조회 성공");
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("[PredictiveController.getSensorHistory] equipmentId={} failed: {}",
+                    equipmentId, e.getMessage(), e);
+            result.put("success", false);
+            result.put("message", "센서 이력 조회 중 오류가 발생했습니다.");
+            return ResponseEntity.status(500).body(result);
+        }
+    }
+
+    /**
+     * GET /api/predictive/equipments/{equipmentId}/maintenance-history
+     * 정비 기록 조회.
+     */
+    @GetMapping("/equipments/{equipmentId}/maintenance-history")
+    public ResponseEntity<Map<String, Object>> getMaintenanceHistory(
+            @PathVariable("equipmentId") Long equipmentId
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        try {
+            List<Map<String, Object>> history = jdbcTemplate.queryForList(
+                    "SELECT ticket_id, repair_status, reported_by, " +
+                    "TO_CHAR(created_at, 'YYYY.MM.DD HH24:MI') AS created_at, " +
+                    "TO_CHAR(resolved_at, 'YYYY.MM.DD HH24:MI') AS resolved_at " +
+                    "FROM maintenance_log WHERE equipment_id = ? " +
+                    "ORDER BY created_at DESC LIMIT 20",
+                    equipmentId
+            );
+            result.put("success", true);
+            result.put("data", history);
+            result.put("message", "정비 기록 조회 성공");
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("[PredictiveController.getMaintenanceHistory] equipmentId={} failed: {}",
+                    equipmentId, e.getMessage(), e);
+            result.put("success", false);
+            result.put("message", "정비 기록 조회 중 오류가 발생했습니다.");
+            return ResponseEntity.status(500).body(result);
+        }
+    }
+
+    /**
+     * POST /api/predictive/equipments/{equipmentId}/resolve
+     * CRITICAL 락 수동 해제 (관리자 조치 완료).
+     */
+    @PostMapping("/equipments/{equipmentId}/resolve")
+    public ResponseEntity<Map<String, Object>> resolveEquipment(
+            @PathVariable("equipmentId") Long equipmentId
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        try {
+            stateMachine.clearCounter(equipmentId);
+            int affected = equipmentMapper.resolveEquipment(equipmentId);
+            if (affected == 0) {
+                result.put("success", false);
+                result.put("message", "해제 대상이 없습니다. (락 상태가 아니거나 존재하지 않는 장비)");
+                return ResponseEntity.status(404).body(result);
+            }
+
+            boolean simulatorReset = mlClient.resetEquipment(equipmentId);
+
+            logger.info("[PredictiveController] 장비 {} 수동 해제 완료 (시뮬레이터 리셋={})", equipmentId, simulatorReset);
+            result.put("success", true);
+            String message = "장비 상태가 정상으로 복원되었습니다.";
+            if (!simulatorReset) {
+                message += " (시뮬레이터 리셋 실패 — 시뮬레이터가 비활성화 상태일 수 있음)";
+            }
+            result.put("message", message);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("[PredictiveController.resolveEquipment] equipmentId={} failed: {}",
+                    equipmentId, e.getMessage(), e);
+            result.put("success", false);
+            result.put("message", "장비 해제 중 오류가 발생했습니다.");
+            return ResponseEntity.status(500).body(result);
         }
     }
 }

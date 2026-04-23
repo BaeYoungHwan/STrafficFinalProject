@@ -8,18 +8,10 @@
       </div>
       <div class="header-filters">
         <select v-model="riskFilter" class="filter-select">
-          <option value="">위험도 전체</option>
-          <option value="LOW">정상 (LOW)</option>
-          <option value="MEDIUM">주의 (MEDIUM)</option>
-          <option value="HIGH">경고 (HIGH)</option>
-          <option value="CRITICAL">위험 (CRITICAL)</option>
+          <option v-for="opt in RISK_FILTER_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
         </select>
         <select v-model="statusFilter" class="filter-select">
-          <option value="">상태 전체</option>
-          <option value="OPERATIONAL">정상가능</option>
-          <option value="REQUESTED">점검요청</option>
-          <option value="IN_PROGRESS">점검중</option>
-          <option value="REQUIRED">점검요망</option>
+          <option v-for="opt in STATUS_FILTER_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
         </select>
       </div>
     </div>
@@ -61,12 +53,12 @@
                   <span
                     class="risk-badge"
                     :style="{
-                      color: RISK_CONFIG[eq.riskLevel].color,
-                      background: RISK_CONFIG[eq.riskLevel].bg
+                      color: getRiskConfig(eq.riskLevel).color,
+                      background: getRiskConfig(eq.riskLevel).bg
                     }"
                   >
-                    <span class="risk-dot" :style="{ background: RISK_CONFIG[eq.riskLevel].color }"></span>
-                    {{ RISK_CONFIG[eq.riskLevel].label }}
+                    <span class="risk-dot" :style="{ background: getRiskConfig(eq.riskLevel).color }"></span>
+                    {{ getRiskConfig(eq.riskLevel).label }}
                   </span>
                 </td>
                 <td class="col-rul">
@@ -79,11 +71,11 @@
                   <span
                     class="status-tag"
                     :style="{
-                      color: STATUS_CONFIG[eq.status].color,
-                      background: STATUS_CONFIG[eq.status].bg,
-                      borderColor: STATUS_CONFIG[eq.status].color + '40'
+                      color: getStatusConfig(eq.status).color,
+                      background: getStatusConfig(eq.status).bg,
+                      borderColor: getStatusConfig(eq.status).color + '40'
                     }"
-                  >{{ STATUS_CONFIG[eq.status].label }}</span>
+                  >{{ getStatusConfig(eq.status).label }}</span>
                 </td>
                 <td class="col-date">{{ eq.lastInspection }}</td>
               </tr>
@@ -102,301 +94,123 @@
         </div>
       </div>
 
-      <!-- 상세 패널 -->
+      <!-- 요약 패널 -->
       <transition name="panel-slide">
         <div v-if="selectedEquipment" class="detail-panel">
-          <!-- 패널 헤더 -->
           <div class="panel-header">
             <div class="panel-title-area">
               <span class="panel-equipment-name">{{ selectedEquipment.name }}</span>
               <span
                 class="status-tag"
                 :style="{
-                  color: STATUS_CONFIG[selectedEquipment.status].color,
-                  background: STATUS_CONFIG[selectedEquipment.status].bg,
-                  borderColor: STATUS_CONFIG[selectedEquipment.status].color + '40'
+                  color: getStatusConfig(selectedEquipment.status).color,
+                  background: getStatusConfig(selectedEquipment.status).bg,
+                  borderColor: getStatusConfig(selectedEquipment.status).color + '40'
                 }"
-              >{{ STATUS_CONFIG[selectedEquipment.status].label }}</span>
+              >{{ getStatusConfig(selectedEquipment.status).label }}</span>
             </div>
             <button class="close-btn" @click="closePanel">×</button>
           </div>
 
-          <div class="panel-install-date">설치일: {{ selectedEquipment.installDate }}</div>
-
-          <!-- 메트릭 카드 4개 -->
-          <div class="metric-grid">
-            <div class="metric-card">
-              <div class="metric-label">모터 전류</div>
-              <div class="metric-value">{{ selectedEquipment.motorCurrent }} <span class="metric-unit">A</span></div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-label">베어링 진동</div>
-              <div class="metric-value">{{ selectedEquipment.vibration }} <span class="metric-unit">m/s²</span></div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-label">온도</div>
-              <div class="metric-value">{{ selectedEquipment.temperature }} <span class="metric-unit">°C</span></div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-label">위험도 스코어</div>
-              <div
-                class="metric-value"
-                :style="{ color: RISK_CONFIG[selectedEquipment.riskLevel].color }"
-              >{{ selectedEquipment.riskScore.toFixed(2) }}</div>
-            </div>
+          <div class="info-table-wrap">
+            <table class="info-table">
+              <tbody>
+                <tr><th>모터 전류</th><td>{{ selectedEquipment.motorCurrent ?? '-' }} A</td></tr>
+                <tr><th>베어링 진동</th><td>{{ selectedEquipment.vibration ?? '-' }} m/s²</td></tr>
+                <tr><th>온도</th><td>{{ selectedEquipment.temperature ?? '-' }} °C</td></tr>
+                <tr>
+                  <th>위험도</th>
+                  <td>
+                    <span class="risk-badge" :style="{ color: getRiskConfig(selectedEquipment.riskLevel).color, background: getRiskConfig(selectedEquipment.riskLevel).bg }">
+                      <span class="risk-dot" :style="{ background: getRiskConfig(selectedEquipment.riskLevel).color }"></span>
+                      {{ getRiskConfig(selectedEquipment.riskLevel).label }}
+                    </span>
+                  </td>
+                </tr>
+                <tr>
+                  <th>잔여 수명</th>
+                  <td :style="{ color: getRulColor(selectedEquipment.rul), fontWeight: 700 }">{{ formatRul(selectedEquipment.rul) }}</td>
+                </tr>
+                <tr><th>최근 점검일</th><td>{{ selectedEquipment.lastInspection ?? '-' }}</td></tr>
+              </tbody>
+            </table>
           </div>
 
-          <!-- RUL 예측 섹션 -->
-          <div class="rul-section">
-            <button
-              class="predict-btn"
-              :disabled="rulPredicting"
-              @click="predictRul"
-            >
-              <span class="predict-icon">⚡</span>
-              {{ rulPredicting ? 'AI 분석 중...' : 'AI 잔여수명 예측' }}
-            </button>
-
-            <transition name="fade">
-              <div v-if="rulResult" class="rul-result">
-                <span
-                  class="rul-grade-badge"
-                  :style="{
-                    color: RISK_CONFIG[rulResult.grade].color,
-                    background: RISK_CONFIG[rulResult.grade].bg,
-                    borderColor: RISK_CONFIG[rulResult.grade].color + '50'
-                  }"
-                >{{ rulResult.grade }}</span>
-                <span class="rul-days">잔여 수명 약 <strong>{{ rulResult.rul }}</strong>일</span>
-              </div>
-            </transition>
-          </div>
-
-          <!-- 모터전류 차트 -->
-          <div class="chart-section">
-            <div class="chart-title">모터전류 추이 (A)</div>
-            <div class="chart-card">
-              <canvas ref="chartMotorRef"></canvas>
-            </div>
-          </div>
-
-          <!-- 베어링진동 차트 -->
-          <div class="chart-section">
-            <div class="chart-title">베어링진동 추이 (m/s²)</div>
-            <div class="chart-card">
-              <canvas ref="chartVibrationRef"></canvas>
-            </div>
-          </div>
+          <button class="detail-link-btn" @click="goToDetail">
+            상세보기
+            <span class="arrow">→</span>
+          </button>
         </div>
       </transition>
     </div>
+
   </div>
 </template>
 
 <script setup>
-import { ref, computed, nextTick, watch, onBeforeUnmount } from 'vue'
-import Chart from 'chart.js/auto'
+import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import api from '../api'
+import { getRiskConfig, getStatusConfig, formatRul, getRulColor, RISK_FILTER_OPTIONS, STATUS_FILTER_OPTIONS } from '../constants/predictive'
 
-// ── Mock 데이터 ──────────────────────────────────────────────
-const MOCK_EQUIPMENTS = [
-  { id: 1, name: 'CAM01', riskLevel: 'LOW',      rul: 312, status: 'OPERATIONAL', motorCurrent: 15.2, vibration: 1.2, temperature: 45, riskScore: 0.12, lastInspection: '2026.03.15', installDate: '2023.06.15' },
-  { id: 2, name: 'CAM02', riskLevel: 'LOW',      rul: 305, status: 'OPERATIONAL', motorCurrent: 14.8, vibration: 1.5, temperature: 43, riskScore: 0.15, lastInspection: '2026.03.14', installDate: '2023.07.20' },
-  { id: 3, name: 'CAM03', riskLevel: 'MEDIUM',   rul: 150, status: 'REQUESTED',   motorCurrent: 18.5, vibration: 3.2, temperature: 62, riskScore: 0.45, lastInspection: '2026.03.12', installDate: '2022.11.10' },
-  { id: 4, name: 'CAM04', riskLevel: 'MEDIUM',   rul: 120, status: 'IN_PROGRESS', motorCurrent: 19.1, vibration: 4.0, temperature: 68, riskScore: 0.52, lastInspection: '2026.03.10', installDate: '2022.08.05' },
-  { id: 5, name: 'CAM05', riskLevel: 'HIGH',     rul: 30,  status: 'REQUIRED',    motorCurrent: 24.5, vibration: 5.8, temperature: 78, riskScore: 0.74, lastInspection: '2026.03.08', installDate: '2021.12.20' },
-  { id: 6, name: 'CAM06', riskLevel: 'CRITICAL', rul: 3,   status: 'REQUIRED',    motorCurrent: 32.1, vibration: 8.5, temperature: 95, riskScore: 0.93, lastInspection: '2026.03.05', installDate: '2021.03.15' },
-]
+const router = useRouter()
 
-// ── 색상 설정 ─────────────────────────────────────────────────
-const RISK_CONFIG = {
-  LOW:      { label: '정상', color: '#10B981', bg: 'rgba(16,185,129,0.15)' },
-  MEDIUM:   { label: '주의', color: '#FBBF24', bg: 'rgba(251,191,36,0.15)' },
-  HIGH:     { label: '경고', color: '#F59E0B', bg: 'rgba(245,158,11,0.15)' },
-  CRITICAL: { label: '위험', color: '#EF4444', bg: 'rgba(239,68,68,0.15)'  },
-}
+// ── 서버 데이터 ───────────────────────────────────────────────
+const equipments = ref([])
+const loading    = ref(false)
+const loadError  = ref(null)
 
-const STATUS_CONFIG = {
-  OPERATIONAL: { label: '정상가능', color: '#10B981', bg: 'rgba(16,185,129,0.15)' },
-  REQUESTED:   { label: '점검요청', color: '#FBBF24', bg: 'rgba(251,191,36,0.15)' },
-  IN_PROGRESS: { label: '점검중',   color: '#1A6DCC', bg: 'rgba(26,109,204,0.15)'  },
-  REQUIRED:    { label: '점검요망', color: '#EF4444', bg: 'rgba(239,68,68,0.15)'   },
+async function fetchEquipments() {
+  loading.value = true
+  loadError.value = null
+  try {
+    const res = await api.get('/predictive/equipments')
+    if (res.data?.success) {
+      equipments.value = res.data.data || []
+    } else {
+      loadError.value = res.data?.message || '장비 목록 조회 실패'
+      equipments.value = []
+    }
+  } catch (e) {
+    loadError.value = e.response?.data?.message || e.message || '네트워크 오류'
+    equipments.value = []
+  } finally {
+    loading.value = false
+  }
 }
 
 // ── 상태 ─────────────────────────────────────────────────────
 const riskFilter   = ref('')
 const statusFilter = ref('')
 const selectedEquipment = ref(null)
-const rulPredicting = ref(false)
-const rulResult     = ref(null)
-const chartMotorRef     = ref(null)
-const chartVibrationRef = ref(null)
-let chartMotor     = null
-let chartVibration = null
 
 // ── computed ─────────────────────────────────────────────────
 const filteredEquipments = computed(() => {
-  return MOCK_EQUIPMENTS.filter(eq => {
+  return equipments.value.filter(eq => {
     const riskOk   = !riskFilter.value   || eq.riskLevel === riskFilter.value
     const statusOk = !statusFilter.value || eq.status    === statusFilter.value
     return riskOk && statusOk
   })
 })
 
-// ── 유틸 함수 ─────────────────────────────────────────────────
-function formatRul(rul) {
-  if (rul <= 3)   return '3일 이내'
-  if (rul <= 30)  return `약 ${rul}일`
-  if (rul <= 180) return `약 ${rul}일`
-  return '300일 이상'
-}
-
-function getRulColor(rul) {
-  if (rul <= 3)   return '#EF4444'
-  if (rul <= 30)  return '#F59E0B'
-  if (rul <= 180) return '#FBBF24'
-  return '#10B981'
-}
-
-function generateTimeSeries(baseValue, points = 12) {
-  return Array.from({ length: points }, () => {
-    const noise = (Math.random() - 0.5) * 0.2 * baseValue
-    return parseFloat((baseValue + noise).toFixed(2))
-  })
-}
-
-function getTimeLabels(points = 12) {
-  const labels = []
-  const now = new Date()
-  for (let i = points - 1; i >= 0; i--) {
-    const d = new Date(now.getTime() - i * 60 * 60 * 1000)
-    labels.push(d.getHours().toString().padStart(2, '0') + ':00')
-  }
-  return labels
-}
-
-// ── 차트 ─────────────────────────────────────────────────────
-function initCharts() {
-  if (!selectedEquipment.value) return
-  const eq = selectedEquipment.value
-  const labels = getTimeLabels(12)
-
-  // 모터전류 차트
-  if (chartMotorRef.value) {
-    chartMotor = new Chart(chartMotorRef.value, {
-      type: 'line',
-      data: {
-        labels,
-        datasets: [{
-          label: '모터 전류 (A)',
-          data: generateTimeSeries(eq.motorCurrent),
-          borderColor: '#1A6DCC',
-          backgroundColor: 'rgba(26,109,204,0.12)',
-          borderWidth: 2,
-          fill: true,
-          tension: 0.4,
-          pointRadius: 3,
-          pointBackgroundColor: '#1A6DCC',
-        }],
-      },
-      options: chartOptions('A'),
-    })
-  }
-
-  // 베어링진동 차트
-  if (chartVibrationRef.value) {
-    chartVibration = new Chart(chartVibrationRef.value, {
-      type: 'line',
-      data: {
-        labels,
-        datasets: [{
-          label: '베어링 진동 (m/s²)',
-          data: generateTimeSeries(eq.vibration),
-          borderColor: '#F59E0B',
-          backgroundColor: 'rgba(245,158,11,0.12)',
-          borderWidth: 2,
-          fill: true,
-          tension: 0.4,
-          pointRadius: 3,
-          pointBackgroundColor: '#F59E0B',
-        }],
-      },
-      options: chartOptions('m/s²'),
-    })
-  }
-}
-
-function chartOptions(unit) {
-  return {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: { display: false },
-      tooltip: {
-        backgroundColor: '#1E2140',
-        titleColor: '#9CA3AF',
-        bodyColor: '#F3F4F6',
-        callbacks: {
-          label: ctx => ` ${ctx.parsed.y} ${unit}`,
-        },
-      },
-    },
-    scales: {
-      x: {
-        ticks: { color: '#9CA3AF', font: { size: 11 } },
-        grid:  { color: 'rgba(255,255,255,0.06)' },
-      },
-      y: {
-        ticks: { color: '#9CA3AF', font: { size: 11 } },
-        grid:  { color: 'rgba(255,255,255,0.06)' },
-      },
-    },
-  }
-}
-
-function destroyCharts() {
-  chartMotor?.destroy()
-  chartMotor = null
-  chartVibration?.destroy()
-  chartVibration = null
-}
-
 // ── 메서드 ────────────────────────────────────────────────────
 function selectEquipment(eq) {
-  rulResult.value = null
-  rulPredicting.value = false
   selectedEquipment.value = eq
 }
 
 function closePanel() {
-  destroyCharts()
   selectedEquipment.value = null
-  rulResult.value = null
-  rulPredicting.value = false
 }
 
-function predictRul() {
-  if (rulPredicting.value || !selectedEquipment.value) return
-  rulPredicting.value = true
-  rulResult.value = null
-  setTimeout(() => {
-    rulPredicting.value = false
-    rulResult.value = {
-      grade: selectedEquipment.value.riskLevel,
-      rul:   selectedEquipment.value.rul,
-    }
-  }, 2000)
+function goToDetail() {
+  if (!selectedEquipment.value) return
+  router.push(`/predictive/${selectedEquipment.value.id}`)
 }
 
-// ── watch ─────────────────────────────────────────────────────
-watch(selectedEquipment, async (eq) => {
-  destroyCharts()
-  if (eq) {
-    await nextTick()
-    initCharts()
-  }
+// ── lifecycle ────────────────────────────────────────────────
+onMounted(() => {
+  fetchEquipments()
 })
-
-onBeforeUnmount(() => destroyCharts())
 </script>
 
 <style scoped>
@@ -709,46 +523,37 @@ onBeforeUnmount(() => destroyCharts())
   border-color: #EF4444;
 }
 
-.panel-install-date {
-  font-size: 12.5px;
-  color: #6B7280;
-  margin-bottom: 20px;
-}
+/* (설치일 → 정보 테이블 내 행으로 이동됨) */
 
-/* ── 메트릭 카드 그리드 ───────────────────────────────────── */
-.metric-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin-bottom: 24px;
+/* ── 상세보기 버튼 ───────────────────────────────────────── */
+.detail-link-btn {
+  width: 100%;
+  padding: 14px;
+  margin-top: 16px;
+  background: linear-gradient(135deg, #1A6DCC, #0F4E9E);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.2s;
 }
-
-.metric-card {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  padding: 14px 16px;
+.detail-link-btn:hover {
+  background: linear-gradient(135deg, #2278DC, #1A6DCC);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(26, 109, 204, 0.35);
 }
-
-.metric-label {
-  font-size: 11.5px;
-  color: #9CA3AF;
-  margin-bottom: 6px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+.detail-link-btn .arrow {
+  font-size: 16px;
+  transition: transform 0.2s;
 }
-
-.metric-value {
-  font-size: 22px;
-  font-weight: 700;
-  color: #F9FAFB;
-  line-height: 1;
-}
-
-.metric-unit {
-  font-size: 13px;
-  font-weight: 400;
-  color: #9CA3AF;
+.detail-link-btn:hover .arrow {
+  transform: translateX(4px);
 }
 
 /* ── RUL 예측 섹션 ────────────────────────────────────────── */
@@ -842,5 +647,161 @@ onBeforeUnmount(() => destroyCharts())
 .chart-card canvas {
   width: 100% !important;
   height: 100% !important;
+}
+
+/* ── 장비 정보 테이블 ────────────────────────────────────── */
+.info-table-wrap {
+  margin-bottom: 20px;
+}
+
+.info-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.info-table th {
+  text-align: left;
+  padding: 10px 14px;
+  color: #9CA3AF;
+  font-weight: 500;
+  width: 110px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  white-space: nowrap;
+}
+
+.info-table td {
+  padding: 10px 14px;
+  color: #F3F4F6;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.info-table tr:last-child th,
+.info-table tr:last-child td {
+  border-bottom: none;
+}
+
+/* ── 액션 버튼 ───────────────────────────────────────────── */
+.panel-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.action-btn {
+  flex: 1;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #E5E7EB;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.2s;
+}
+
+.action-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.25);
+  transform: translateY(-1px);
+}
+
+.action-history:hover {
+  border-color: #1A6DCC;
+  color: #93C5FD;
+}
+
+.action-alert:hover {
+  border-color: #F59E0B;
+  color: #FCD34D;
+}
+
+/* ── 모달 ────────────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-card {
+  background: #fff;
+  border-radius: 16px;
+  width: 600px;
+  max-width: 90vw;
+  max-height: 80vh;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+  border-bottom: 1px solid #E5E7EB;
+}
+
+.modal-header .close-btn {
+  background: #F3F4F6;
+  border: 1px solid #E5E7EB;
+  color: #6B7280;
+}
+.modal-header .close-btn:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: #EF4444;
+  border-color: #EF4444;
+}
+
+.modal-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #1A1A2E;
+  margin: 0;
+}
+
+.modal-body {
+  padding: 20px 24px;
+  overflow-y: auto;
+}
+
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.history-table th {
+  padding: 10px 12px;
+  text-align: left;
+  font-weight: 600;
+  color: #6B7280;
+  font-size: 12px;
+  border-bottom: 2px solid #E5E7EB;
+  white-space: nowrap;
+}
+
+.history-table td {
+  padding: 10px 12px;
+  color: #374151;
+  border-bottom: 1px solid #F3F4F6;
+}
+
+.empty-history {
+  text-align: center;
+  padding: 40px 0;
+  color: #9CA3AF;
+  font-size: 14px;
 }
 </style>

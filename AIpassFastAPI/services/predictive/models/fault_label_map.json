@@ -1,0 +1,5 @@
+{
+  "0": "BEARING_FAULT",
+  "1": "COMPOUND_FAULT",
+  "2": "MOTOR_FAULT"
+}

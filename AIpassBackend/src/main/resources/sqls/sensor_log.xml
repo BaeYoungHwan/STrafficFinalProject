@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.aipass.dao.SensorLogMapper">
+
+    <insert id="insertBatch" parameterType="java.util.List">
+        INSERT INTO sensor_log
+            (equipment_id, temperature, vibration, motor_current,
+             is_anomaly, anomaly_score, fault_type, risk_level, recorded_at)
+        VALUES
+        <foreach collection="items" item="it" separator=",">
+            (#{it.equipmentId}, #{it.temperature}, #{it.vibration}, #{it.motorCurrent},
+             #{it.isAnomaly}, #{it.anomalyScore}, #{it.faultType}, #{it.riskLevel},
+             COALESCE(#{it.recordedAt}, CURRENT_TIMESTAMP))
+        </foreach>
+    </insert>
+
+    <select id="countAll" resultType="int">
+        SELECT COUNT(*) FROM sensor_log
+    </select>
+
+    <select id="selectHistory" resultType="map">
+        SELECT
+            date_trunc('minute', recorded_at)
+                - (EXTRACT(MINUTE FROM recorded_at)::int % #{interval}) * INTERVAL '1 minute' AS recorded_at,
+            ROUND(AVG(motor_current)::numeric, 2)  AS motor_current,
+            ROUND(AVG(vibration)::numeric, 3)      AS vibration,
+            ROUND(AVG(temperature)::numeric, 1)    AS temperature
+        FROM sensor_log
+        WHERE equipment_id = #{equipmentId}
+          AND recorded_at >= NOW() - #{hours} * INTERVAL '1 hour'
+        GROUP BY 1
+        ORDER BY 1
+    </select>
+
+</mapper>
