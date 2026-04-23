@@ -27,6 +27,7 @@ PLATE_PATTERN = re.compile(
     rf"^(\d{{2,3}}{_VALID_CHARS}\d{{4}}|[가-힣]{{2}}\s?\d{{2}}{_VALID_CHARS}\d{{4}})$"
 )
 CONFIDENCE_THRESHOLD = 0.85
+EASYOCR_CONFIDENCE_THRESHOLD = 0.70  # EasyOCR conf 분포가 PaddleOCR보다 낮음
 
 # OCR 오인식 교정 테이블: OCR이 잘못 읽은 문자 → 한글 후보 목록 (유사도 순)
 _OCR_CORRECTION_MAP: dict[str, list[str]] = {
@@ -138,11 +139,77 @@ def _correct_ocr_text(text: str) -> list[str]:
     return candidates
 
 
+def _run_easyocr_on_crop(img: np.ndarray) -> tuple[str | None, float]:
+    """EasyOCR로 번호판 크롭 이미지에서 텍스트를 추출한다.
+
+    EasyOCR 결과 형식: [(bbox, text, confidence), ...]
+    PaddleOCR와 달리 단일 리스트이며 bbox는 4점 좌표 리스트.
+
+    Returns:
+        (plate_text, confidence): PLATE_PATTERN 매칭 시 번호판 문자열과 평균 신뢰도.
+                                  매칭 실패 시 (None, 0.0).
+    """
+    if img is None or img.size == 0:
+        return None, 0.0
+    try:
+        reader = _get_easyocr_reader()
+        raw_results = reader.readtext(img, detail=1, paragraph=False)
+    except Exception as exc:
+        logger.warning("[EasyOCR] 추론 오류: %s", exc)
+        return None, 0.0
+
+    if not raw_results:
+        return None, 0.0
+
+    # bbox x좌표 기준 정렬 (번호판 좌→우 순서 보장)
+    # EasyOCR bbox: [[x1,y1],[x2,y1],[x2,y2],[x1,y2]]
+    def _bbox_x_center(item):
+        bbox = item[0]
+        xs = [p[0] for p in bbox]
+        return sum(xs) / len(xs)
+
+    sorted_results = sorted(raw_results, key=_bbox_x_center)
+
+    texts = []
+    confs = []
+    for (bbox, text, conf) in sorted_results:
+        corrected = _correct_digit_positions(text)
+        cleaned = re.sub(r'[^0-9가-힣]', '', corrected)
+        if cleaned:
+            texts.append(cleaned)
+            confs.append(float(conf))
+
+    if not texts:
+        return None, 0.0
+
+    avg_conf = sum(confs) / len(confs)
+    combined = "".join(texts)
+
+    # 시도 1: 직접 결합 → PLATE_PATTERN 매칭
+    if PLATE_PATTERN.match(combined):
+        logger.info("[EasyOCR] 직접 인식: %s (conf=%.3f)", combined, avg_conf)
+        return combined, avg_conf
+
+    # 시도 2: _positional_hangul_recovery 교정 시도
+    recovered = _positional_hangul_recovery(combined)
+    if recovered:
+        logger.info("[EasyOCR] 위치기반 교정: %s → %s (conf=%.3f)", combined, recovered, avg_conf)
+        return recovered, avg_conf * 0.9  # 교정됐으므로 신뢰도 10% 페널티
+
+    # 시도 3: _correct_ocr_text 교정 테이블 시도
+    corrections = _correct_ocr_text(combined)
+    if corrections:
+        logger.info("[EasyOCR] 교정테이블: %s → %s (conf=%.3f)", combined, corrections[0], avg_conf)
+        return corrections[0], avg_conf * 0.85
+
+    return None, 0.0
+
+
 # 유사 한글 혼동 교정 테이블 (획 모양이 비슷해서 OCR이 오인식하는 케이스)
 _CONFUSABLE_HANGUL: dict[str, list[str]] = {
     "어": ["허", "서", "저"],
     "허": ["어", "서"],
-    "오": ["호", "소"],
+    "오": ["호", "소", "어"],    # 어→오 오인식 교정 추가
     "호": ["오", "소"],
     "아": ["하", "사"],
     "하": ["아"],
@@ -161,7 +228,7 @@ _CONFUSABLE_HANGUL: dict[str, list[str]] = {
     "저": ["자", "어"],
     "자": ["저"],
     "거": ["가"],
-    "가": ["거"],
+    "가": ["거", "나", "라", "마"],  # 라→가 오인식 교정 추가 (저화질 획 유사)
     "도": ["로", "고", "소"],
     "로": ["도", "고"],
     "고": ["도", "로", "호"],
@@ -268,10 +335,38 @@ ocr_model = PaddleOCR(
     use_doc_orientation_classify=False,
     use_doc_unwarping=False,
     cpu_threads=2,          # OCR 전용 코어 2개로 제한 → YOLO/MJPEG 코어 경쟁 방지
-    det_db_thresh=0.2,      # 기본 0.3 → 희미한 문자도 감지
+    det_db_thresh=0.15,     # 기본 0.3 → 0.15로 완화: 희미/모션블러 문자 감지율 향상
     det_db_box_thresh=0.4,  # 기본 0.5 → 작은 문자 bbox 생존
-    rec_batch_num=6,        # 번호판 최대 6문자 일괄 처리
+    rec_batch_num=7,        # 번호판 최대 7문자 일괄 처리 (지역 번호판 대응)
 )
+
+
+# ── EasyOCR Lazy Initializer ─────────────────────────────────────────────
+_easyocr_reader = None
+_easyocr_lock = None
+
+
+def _get_easyocr_reader():
+    """EasyOCR Reader 지연 초기화. 첫 UNRECOGNIZED 케이스 발생 시에만 모델 로딩.
+
+    threading.Lock으로 _ocr_executor 스레드 간 중복 초기화 방지.
+    gpu=False: PaddleOCR와 GPU 메모리 경합 방지.
+    """
+    global _easyocr_reader, _easyocr_lock
+    import threading
+    if _easyocr_lock is None:
+        _easyocr_lock = threading.Lock()
+    with _easyocr_lock:
+        if _easyocr_reader is None:
+            import easyocr
+            logger.info("[EasyOCR] 모델 초기화 시작 (ko + en)...")
+            _easyocr_reader = easyocr.Reader(
+                ['ko', 'en'],
+                gpu=False,
+                verbose=False,
+            )
+            logger.info("[EasyOCR] 모델 초기화 완료")
+    return _easyocr_reader
 
 
 def _normalize_ocr_result(result) -> list | None:
@@ -644,6 +739,51 @@ async def extract_license_plate(frame: np.ndarray) -> str:
         except Exception as e:
             logger.error(f"[OCR] Exception during extraction: {e}")
             return "UNRECOGNIZED"
+
+
+async def extract_license_plate_ensemble(frame: np.ndarray, runs: int = 3) -> str:
+    """앙상블 OCR: 동일 이미지를 runs회 인식 후 다수결로 최종 번호판 결정.
+
+    - 2/3 이상 일치 → 해당 결과 반환 (다수결 채택)
+    - 전원 불일치 → needs_review=True 강제 (버그 3·4 핵심 방어)
+    - MANUAL_REVIEW_REQUIRED 결과도 다수결 대상에 포함
+    """
+    results = []
+    for _ in range(runs):
+        r = await extract_license_plate(frame)
+        results.append(r)
+
+    logger.info(f"[Ensemble OCR] Raw results: {results}")
+
+    # 정규화: MANUAL_REVIEW_REQUIRED 접두사 제거 후 실제 값으로 카운팅
+    def _normalize(r: str) -> str:
+        return r.split(":", 1)[1] if r.startswith("MANUAL_REVIEW_REQUIRED:") else r
+
+    normalized = [_normalize(r) for r in results]
+
+    from collections import Counter
+    counts = Counter(normalized)
+    most_common_text, most_common_count = counts.most_common(1)[0]
+
+    majority_threshold = runs // 2 + 1  # runs=3 → 2표 이상
+    if most_common_count >= majority_threshold:
+        # 다수결 채택: 원본 결과 중 해당 텍스트를 가진 것의 접두사 확인
+        any_needs_review = any(
+            r.startswith("MANUAL_REVIEW_REQUIRED:") and _normalize(r) == most_common_text
+            for r in results
+        )
+        # 다수결 결과 자체가 MANUAL_REVIEW였으면 review 유지, 아니면 정상 처리
+        if any_needs_review and not any(
+            r == most_common_text for r in results
+        ):
+            logger.info(f"[Ensemble OCR] Majority (review): {most_common_text} ({most_common_count}/{runs})")
+            return f"MANUAL_REVIEW_REQUIRED:{most_common_text}"
+        logger.info(f"[Ensemble OCR] Majority: {most_common_text} ({most_common_count}/{runs})")
+        return most_common_text
+    else:
+        # 다수결 미달 → 강제 review (버그 3·4: 완전 오인식이 높은 신뢰도로 통과하는 케이스 차단)
+        logger.warning(f"[Ensemble OCR] No majority — forcing MANUAL_REVIEW. Results: {results}")
+        return f"MANUAL_REVIEW_REQUIRED:{most_common_text}"
 
 
 def _detect_plate_by_ocr_clustering(frame: np.ndarray) -> tuple[np.ndarray | None, str, bool]:
@@ -1287,6 +1427,31 @@ async def run_ocr_on_file(src_path: str) -> dict:
         if _fb_stage_minus1_text:
             logger.warning(f"[OCR] Stage-1 부분 결과 활용: {_fb_stage_minus1_text} (conf={_fb_stage_minus1_conf:.3f})")
             return _fb_stage_minus1_crop, f"MANUAL_REVIEW_REQUIRED:{_fb_stage_minus1_text}", True
+
+        # ── Stage 8: EasyOCR Fallback ─────────────────────────────────────────
+        # PaddleOCR 전 단계 실패 시에만 진입. 기존 파이프라인 변경 없음.
+        # 투입 우선순위: yolo_crop > _fb_stage_minus1_crop > bumper_frame
+        _s8_sources = [
+            ("YOLO",    yolo_crop),
+            ("Stage-1", _fb_stage_minus1_crop),
+            ("bumper",  bumper_frame),
+        ]
+        for _s8_name, _s8_img in _s8_sources:
+            if _s8_img is None:
+                continue
+            if not _validate_crop(_s8_img):
+                continue
+            logger.debug("[OCR Stage8] EasyOCR 시도: source=%s", _s8_name)
+            _s8_text, _s8_conf = _run_easyocr_on_crop(_s8_img)
+            if _s8_text:
+                _s8_needs_review = _s8_conf < EASYOCR_CONFIDENCE_THRESHOLD
+                logger.info(
+                    "[OCR Stage8] EasyOCR 인식 성공: %s (source=%s, conf=%.3f, needs_review=%s)",
+                    _s8_text, _s8_name, _s8_conf, _s8_needs_review,
+                )
+                return _s8_img, _s8_text, _s8_needs_review
+
+        logger.warning("[OCR Stage8] EasyOCR 모두 실패 → UNRECOGNIZED")
         return None, "UNRECOGNIZED", True
 
     # OCR 전용 executor + 세마포어로 동시 실행 수 제한 (MJPEG 스트림 스레드 보호)
@@ -1343,9 +1508,8 @@ async def run_ocr_on_file(src_path: str) -> dict:
 async def process_violation_task(crop_frame: np.ndarray, violation_type: str, confidence: float):
     logger.info(f"Processing violation: {violation_type}...")
 
-    # OCR 실행
-    ocr_task = extract_license_plate(crop_frame)
-    plate_text_raw = await ocr_task
+    # OCR 실행 (앙상블 3회 다수결 — 버그 3·4 완전 오인식 자동승인 방어)
+    plate_text_raw = await extract_license_plate_ensemble(crop_frame, runs=3)
 
     # MANUAL_REVIEW 접두사 처리: 접두사 제거 후 실제 값만 추출, needs_review 플래그 세팅
     needs_review = False

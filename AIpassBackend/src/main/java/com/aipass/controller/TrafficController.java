@@ -53,41 +53,6 @@ public class TrafficController {
         // MyBatis map resultType 은 키를 소문자로 반환하므로 camelCase 키로 재매핑합니다.
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("totalIntersections", summary.getOrDefault("total_intersections", 0));
-        result.put("normalCount",        summary.getOrDefault("normal_count",        0));
-        result.put("cautionCount",       summary.getOrDefault("caution_count",       0));
-        result.put("emergencyCount",     summary.getOrDefault("emergency_count",     0));
-        result.put("avgCycleTime",       summary.getOrDefault("avg_cycle_time",      80));
-        return ResponseEntity.ok(result);
-    }
-
-    @PostMapping("/intersections/{id}/signal")
-    public ResponseEntity<?> updateSignal(@PathVariable Long id,
-                                          @RequestBody Map<String, Integer> request) {
-        Integer greenTime  = request.get("greenTime");
-        Integer yellowTime = request.get("yellowTime");
-        Integer redTime    = request.get("redTime");
-
-        if (greenTime == null || yellowTime == null || redTime == null) {
-            return ResponseEntity.badRequest().body(Map.of("message", "신호 시간을 모두 입력하세요."));
-        }
-        if (greenTime < 10 || greenTime > 120) {
-            return ResponseEntity.badRequest().body(Map.of("message", "녹색 신호는 10~120초 범위여야 합니다."));
-        }
-        if (redTime < 10 || redTime > 120) {
-            return ResponseEntity.badRequest().body(Map.of("message", "적색 신호는 10~120초 범위여야 합니다."));
-        }
-
-        trafficMapper.updateSignal(id, greenTime, yellowTime, redTime);
-
-        TrafficIntersectionDTO updated = trafficMapper.findById(id);
-        if (updated == null) {
-            return ResponseEntity.status(404).body(Map.of("message", "교차로를 찾을 수 없습니다."));
-        }
-
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("success", true);
-        result.put("message", "신호 설정이 변경되었습니다.");
-        result.put("data", updated);
         return ResponseEntity.ok(result);
     }
 }

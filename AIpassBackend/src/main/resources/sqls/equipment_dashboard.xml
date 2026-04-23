@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.aipass.dao.EquipmentDashboardMapper">
+
+    <!-- 공통 SELECT 절
+         - risk_level: DB 원값(LOW/MEDIUM/HIGH/CRITICAL) 그대로 반환
+           → 한글 라벨/색상 변환은 Java RiskLevel enum에서 처리
+         - rul = GREATEST(0, 300 - 경과일)
+         - 최신 센서값은 LATERAL JOIN
+         - 최근 완료 정비일은 LEFT JOIN (완료 상태만)
+    -->
+    <sql id="dashboardSelect">
+        SELECT
+            e.equipment_id                                                      AS id,
+            'CAM' || LPAD(e.equipment_id::text, 2, '0')                         AS name,
+            COALESCE(e.risk_level, 'LOW')                                       AS risk_level,
+            GREATEST(0, 300 - (CURRENT_DATE - e.installation_date))::int        AS rul,
+            COALESCE(e.status, '정상가동')                                       AS status,
+            COALESCE(s.motor_current, 0)                                        AS motor_current,
+            COALESCE(s.vibration, 0)                                            AS vibration,
+            COALESCE(s.temperature, 0)                                          AS temperature,
+            COALESCE(s.anomaly_score, 0)                                        AS risk_score,
+            TO_CHAR(m.last_resolved, 'YYYY.MM.DD')                              AS last_inspection,
+            TO_CHAR(e.installation_date, 'YYYY.MM.DD')                          AS install_date
+        FROM equipment e
+        LEFT JOIN LATERAL (
+            SELECT motor_current, vibration, temperature, anomaly_score
+            FROM sensor_log
+            WHERE equipment_id = e.equipment_id
+            ORDER BY recorded_at DESC
+            LIMIT 1
+        ) s ON TRUE
+        LEFT JOIN (
+            SELECT equipment_id, MAX(resolved_at) AS last_resolved
+            FROM maintenance_log
+            WHERE repair_status = '완료'
+            GROUP BY equipment_id
+        ) m ON m.equipment_id = e.equipment_id
+    </sql>
+
+    <select id="selectAll" resultType="com.aipass.dto.EquipmentDashboardDTO">
+        <include refid="dashboardSelect"/>
+        ORDER BY e.equipment_id
+    </select>
+
+    <select id="selectById" resultType="com.aipass.dto.EquipmentDashboardDTO">
+        <include refid="dashboardSelect"/>
+        WHERE e.equipment_id = #{equipmentId}
+    </select>
+
+</mapper>

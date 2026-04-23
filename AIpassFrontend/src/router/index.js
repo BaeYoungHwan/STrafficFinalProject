@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { useNotificationStore } from '../stores/notification'
 
 const routes = [
   {
@@ -79,6 +80,13 @@ router.beforeEach(async (to) => {
 
   if (to.meta.requiresAuth && !auth.isLoggedIn) {
     return '/login'
+  }
+
+  // 로그인 상태이고 인증 필요 페이지 → SSE 연결 + 초기 알림 로드
+  if (auth.isLoggedIn && to.meta.requiresAuth) {
+    const notificationStore = useNotificationStore()
+    notificationStore.connect()
+    notificationStore.fetchInitial()
   }
 
   if (!to.meta.requiresAuth && auth.isLoggedIn && (to.name === 'Login' || to.name === 'Signup')) {

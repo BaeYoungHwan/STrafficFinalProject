@@ -32,3 +32,11 @@ psycopg2-binary==2.9.11
 # Web Scraping (Naver Weather — JS 렌더링)
 # 설치 후 한 번만 실행: python -m playwright install chromium
 playwright>=1.49.0
+
+# Fallback OCR (Stage 8 — PaddleOCR 전 단계 실패 시에만 사용)
+easyocr==1.7.2
+
+# 예지보전 ML (anomaly + fault 분류)
+scikit-learn==1.8.0
+xgboost==3.2.0
+joblib==1.4.2

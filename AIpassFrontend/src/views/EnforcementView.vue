@@ -4,9 +4,16 @@
     <div class="section-header">
       <h2 class="section-title">* 위반 차량 상세 정보 조회</h2>
       <div class="section-actions">
-        <button class="btn-cctv" @click="showStreamModal = true" title="실시간 과속 감지 모니터">
-          <img src="/icons/CCTV.png" alt="CCTV" class="cctv-icon" />
-        </button>
+        <div class="stream-btn-group">
+          <button class="btn-cctv btn-cctv-speed" @click="openSpeedStream" title="실시간 과속 감지 모니터">
+            <span class="btn-cctv-label">과속</span>
+            <img src="/icons/CCTV.png" alt="CCTV" class="cctv-icon" />
+          </button>
+          <button class="btn-cctv btn-cctv-line" @click="openLineStream" title="실시간 실선침범 감지 모니터">
+            <span class="btn-cctv-label">실선</span>
+            <img src="/icons/CCTV.png" alt="CCTV" class="cctv-icon cctv-icon-orange" />
+          </button>
+        </div>
         <button class="btn-refresh" @click="fetchList" title="새로 고침">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
@@ -34,7 +41,7 @@
             <option value="과속">과속</option>
             <option value="신호위반">신호위반</option>
             <option value="중앙선 침범">중앙선 침범</option>
-            <option value="차선 위반">차선 위반</option>
+            <option value="실선 침범">실선 침범</option>
           </select>
         </div>
         <div class="filter-item">
@@ -122,7 +129,7 @@
             <div class="image-box-label">차량 전체</div>
             <img
               v-if="selectedItem.srcImageUrl"
-              :src="'/ai/images/' + selectedItem.srcImageUrl"
+              :src="(selectedItem.violationType === 'LINE_CROSSING_VIOLATION' ? '/ai-line/images/' : '/ai/images/') + selectedItem.srcImageUrl"
               alt="차량 전체 사진"
               @error="$event.target.style.display='none'"
             />
@@ -132,7 +139,7 @@
             <div class="image-box-label">번호판 크롭</div>
             <img
               v-if="selectedItem.imageUrl"
-              :src="'/ai/images/' + selectedItem.imageUrl"
+              :src="(selectedItem.violationType === 'LINE_CROSSING_VIOLATION' ? '/ai-line/images/' : '/ai/images/') + selectedItem.imageUrl"
               alt="번호판"
               @error="$event.target.style.display='none'"
             />
@@ -163,7 +170,7 @@
                   <option>과속</option>
                   <option>신호위반</option>
                   <option>중앙선 침범</option>
-                  <option>차선 위반</option>
+                  <option>실선 침범</option>
                 </select>
               </td>
             </tr>
@@ -227,13 +234,13 @@
   <div v-if="showStreamModal" class="stream-modal-overlay" @click.self="showStreamModal = false">
     <div class="stream-modal">
       <div class="stream-modal-header">
-        <span>실시간 과속 감지 모니터</span>
+        <span>{{ streamTitle }}</span>
         <button class="btn-close" @click="showStreamModal = false">✕</button>
       </div>
       <img
         :src="streamUrl"
         class="stream-img"
-        alt="실시간 과속 감지 스트림"
+        :alt="streamTitle"
       />
     </div>
   </div>
@@ -242,6 +249,10 @@
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import api from '../api'
+import { useNotificationStore } from '../stores/notification'
+
+const notifStore = useNotificationStore()
+watch(() => notifStore.violationTick, () => fetchList())
 
 const items = ref([])
 const loading = ref(false)
@@ -261,6 +272,25 @@ watch(showStreamModal, (val) => {
   document.body.style.paddingRight = val ? scrollbarWidth + 'px' : ''
 })
 const streamUrl = ref('')
+const streamTitle = ref('실시간 과속 감지 모니터')
+
+function openSpeedStream() {
+  streamTitle.value = '실시간 과속 감지 모니터'
+  const base = import.meta.env.DEV
+    ? (import.meta.env.VITE_FASTAPI_SPEED_URL || 'http://localhost:8000') + '/api/v1/stream/video'
+    : '/ai/api/v1/stream/video'
+  streamUrl.value = base + '?t=' + Date.now()
+  showStreamModal.value = true
+}
+
+function openLineStream() {
+  streamTitle.value = '실시간 실선침범 감지 모니터'
+  const base = import.meta.env.DEV
+    ? (import.meta.env.VITE_FASTAPI_LINE_URL || 'http://localhost:8001') + '/api/v1/stream/video'
+    : '/ai-line/api/v1/stream/video'
+  streamUrl.value = base + '?t=' + Date.now()
+  showStreamModal.value = true
+}
 
 const page = ref(1)
 const size = ref(10)
@@ -390,9 +420,6 @@ const updateStatus = async (newStatus) => {
 
 onMounted(() => {
   fetchList()
-  streamUrl.value = import.meta.env.DEV
-    ? 'http://localhost:8000/api/v1/stream/video'
-    : '/ai/api/v1/stream/video'
 })
 </script>
 
@@ -446,6 +473,12 @@ onMounted(() => {
   gap: 8px;
 }
 
+.stream-btn-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .btn-cctv {
   background: none;
   border: 1px solid #2a2a4a;
@@ -453,13 +486,44 @@ onMounted(() => {
   padding: 4px 8px;
   cursor: pointer;
   display: flex;
+  flex-direction: column;
   align-items: center;
+  gap: 2px;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.btn-cctv:hover {
+  background: rgba(26, 109, 204, 0.06);
+}
+
+.btn-cctv-line {
+  border-color: #EA580C;
+}
+
+.btn-cctv-line:hover {
+  background: rgba(234, 88, 12, 0.06);
+}
+
+.btn-cctv-label {
+  font-size: 9px;
+  font-weight: 700;
+  color: #2a2a4a;
+  line-height: 1;
+}
+
+.btn-cctv-line .btn-cctv-label {
+  color: #EA580C;
 }
 
 .cctv-icon {
   width: 24px;
   height: 24px;
   object-fit: contain;
+  pointer-events: none;
+}
+
+.cctv-icon-orange {
+  filter: sepia(1) saturate(5) hue-rotate(-10deg) brightness(0.85);
 }
 
 /* 필터 패널 */

@@ -1579,3 +1579,262 @@ class TestRunOcrOnFileExecutorOffloading:
             "_fallback_crop 이 run_in_executor 를 통해 호출되지 않았습니다 — "
             "이벤트 루프 차단 위험이 있습니다."
         )
+
+
+# ============================================================
+# N. _get_easyocr_reader / _run_easyocr_on_crop  (Stage 8)
+# ============================================================
+
+from services.ocr_storage import (
+    _get_easyocr_reader,
+    _run_easyocr_on_crop,
+)
+
+# EasyOCR readtext 결과의 단일 항목 형식: (bbox, text, conf)
+# bbox x좌표 오름차순으로 설정하여 정렬 후 좌→우 결합 순서가 유지되도록 한다.
+def _easy_line(text: str, conf: float, x_start: int = 0):
+    """EasyOCR readtext 반환 형식 단일 항목 팩토리.
+
+    x_start 를 지정하면 여러 bbox 의 x 좌표 순서를 제어할 수 있다.
+    (구현이 bbox x중심 기준으로 정렬하므로 x_start 가 낮을수록 앞에 온다)
+    """
+    bbox = [[x_start, 0], [x_start + 60, 0], [x_start + 60, 30], [x_start, 30]]
+    return (bbox, text, conf)
+
+
+class TestGetEasyocrReaderSingleton:
+    """_get_easyocr_reader lazy-init 싱글톤 보장 검증"""
+
+    def setup_method(self):
+        """각 테스트 전 모듈 레벨 싱글톤 및 락 초기화."""
+        import services.ocr_storage as _mod
+        _mod._easyocr_reader = None
+        _mod._easyocr_lock = None
+
+    def teardown_method(self):
+        """테스트 후 싱글톤 초기화 (다음 테스트 격리)."""
+        import services.ocr_storage as _mod
+        _mod._easyocr_reader = None
+        _mod._easyocr_lock = None
+
+    def test_returns_reader_instance(self):
+        """정상 호출 시 None 이 아닌 reader 를 반환해야 한다."""
+        reader = _get_easyocr_reader()
+        assert reader is not None
+
+    def test_singleton_same_object_on_two_calls(self):
+        """두 번 호출해도 동일 객체(is)를 반환해야 한다."""
+        reader1 = _get_easyocr_reader()
+        reader2 = _get_easyocr_reader()
+        assert reader1 is reader2, "두 번째 호출이 새 인스턴스를 생성하면 안 됨"
+
+    def test_easyocr_reader_initialized_exactly_once(self):
+        """easyocr.Reader 생성자가 정확히 1회만 호출되어야 한다."""
+        import easyocr
+
+        with patch.object(easyocr, "Reader", wraps=easyocr.Reader) as mock_reader_cls:
+            _get_easyocr_reader()
+            _get_easyocr_reader()
+            assert mock_reader_cls.call_count == 1, (
+                f"easyocr.Reader 생성자가 {mock_reader_cls.call_count}회 호출됨 — 1회만 허용"
+            )
+
+    def test_reader_initialization_error_propagates_in_run_easyocr(self):
+        """_get_easyocr_reader 가 예외를 raise 하면 _run_easyocr_on_crop 이 (None, 0.0) 을 반환한다.
+
+        _get_easyocr_reader 자체는 예외를 전파하지만 _run_easyocr_on_crop 의
+        try/except 에서 (None, 0.0) 로 안전하게 처리되어야 한다.
+        """
+        img = np.zeros((60, 200, 3), dtype=np.uint8)
+        with patch("services.ocr_storage._get_easyocr_reader", side_effect=RuntimeError("GPU 없음")):
+            plate, conf = _run_easyocr_on_crop(img)
+        assert plate is None, "초기화 예외 → (None, 0.0) 이어야 함"
+        assert conf == 0.0
+
+
+class TestRunEasyocrOnCrop:
+    """_run_easyocr_on_crop 동작 시나리오 검증
+
+    실제 구현의 처리 파이프라인:
+    1. 빈 이미지 → (None, 0.0) 즉시 반환
+    2. readtext() 호출 → bbox x중심 정렬 → _correct_digit_positions 적용 → [0-9가-힣] 만 추출
+    3. combined (전체 결합 텍스트) PLATE_PATTERN 직접 매칭 → avg_conf 반환
+    4. _positional_hangul_recovery(combined) 교정 → avg_conf * 0.9 (10% 페널티)
+    5. _correct_ocr_text(combined) 교정 → avg_conf * 0.85 (15% 페널티)
+    6. 전부 실패 → (None, 0.0)
+    """
+
+    _IMG = np.zeros((60, 200, 3), dtype=np.uint8)
+
+    def setup_method(self):
+        """각 테스트 전 싱글톤 초기화 (모킹 충돌 방지)."""
+        import services.ocr_storage as _mod
+        _mod._easyocr_reader = None
+        _mod._easyocr_lock = None
+
+    def teardown_method(self):
+        import services.ocr_storage as _mod
+        _mod._easyocr_reader = None
+        _mod._easyocr_lock = None
+
+    def _patch_readtext(self, return_value=None, side_effect=None):
+        """_get_easyocr_reader 가 반환하는 mock reader 의 readtext 를 교체한다."""
+        mock_reader = MagicMock()
+        if side_effect is not None:
+            mock_reader.readtext.side_effect = side_effect
+        else:
+            mock_reader.readtext.return_value = return_value if return_value is not None else []
+        return patch("services.ocr_storage._get_easyocr_reader", return_value=mock_reader)
+
+    # ── 경로 1: 직접 PLATE_PATTERN 매칭 (combined 이 패턴에 직접 부합) ──
+
+    def test_direct_match_2digit_prefix_returns_plate_and_conf(self):
+        """2자리 숫자 번호판을 단일 bbox 에서 직접 인식할 때 그대로 반환한다."""
+        with self._patch_readtext([_easy_line("12가3456", 0.92)]):
+            plate, conf = _run_easyocr_on_crop(self._IMG)
+        assert plate == "12가3456", f"직접 매칭 실패: {plate}"
+        assert abs(conf - 0.92) < 1e-6, f"conf 불일치: {conf}"
+
+    def test_direct_match_3digit_prefix(self):
+        """3자리 숫자 접두사 번호판도 직접 매칭 경로로 처리된다."""
+        with self._patch_readtext([_easy_line("123나4567", 0.88)]):
+            plate, conf = _run_easyocr_on_crop(self._IMG)
+        assert plate == "123나4567"
+        assert abs(conf - 0.88) < 1e-6
+
+    def test_non_plate_ascii_in_digit_position_stripped_before_match(self):
+        """ASCII 문자가 숫자 위치에 섞여 있을 때 _correct_digit_positions 로 처리된 후 매칭된다.
+
+        'Z' 는 _LETTER_TO_DIGIT 에서 '2' 로 교정되므로 '12Z가3456' → '122가3456' 이 되어
+        PLATE_PATTERN ('122가3456') 에 직접 매칭된다.
+        """
+        with self._patch_readtext([_easy_line("12Z가3456", 0.85)]):
+            plate, conf = _run_easyocr_on_crop(self._IMG)
+        # Z→2 교정 후 "122가3456" 이 직접 매칭
+        assert plate == "122가3456", f"digit-position 교정 후 매칭 실패: {plate}"
+        assert abs(conf - 0.85) < 1e-6
+
+    # ── 경로 1 (다중 bbox 결합 직접 매칭) ──
+
+    def test_multi_bbox_combined_returns_plate_and_avg_conf(self):
+        """분리된 bbox 텍스트를 결합해 PLATE_PATTERN 이 매칭될 때 평균 conf 를 반환한다."""
+        readtext_result = [
+            _easy_line("12", 0.90, x_start=0),
+            _easy_line("가", 0.85, x_start=70),
+            _easy_line("3456", 0.88, x_start=140),
+        ]
+        with self._patch_readtext(readtext_result):
+            plate, conf = _run_easyocr_on_crop(self._IMG)
+        assert plate == "12가3456", f"bbox 결합 직접 매칭 실패: {plate}"
+        expected_avg = (0.90 + 0.85 + 0.88) / 3
+        assert abs(conf - expected_avg) < 1e-5, f"평균 conf 불일치: {conf} != {expected_avg}"
+
+    def test_multi_bbox_two_segments_combined(self):
+        """2개 bbox 결합도 동일하게 처리된다."""
+        readtext_result = [
+            _easy_line("12가", 0.83, x_start=0),
+            _easy_line("3456", 0.87, x_start=80),
+        ]
+        with self._patch_readtext(readtext_result):
+            plate, conf = _run_easyocr_on_crop(self._IMG)
+        assert plate == "12가3456"
+        expected_avg = (0.83 + 0.87) / 2
+        assert abs(conf - expected_avg) < 1e-5
+
+    # ── 경로 2: positional_hangul_recovery 교정 경유 (10% 페널티) ──
+
+    def test_positional_recovery_extra_leading_digit_with_conf_penalty(self):
+        """4자리 선두 숫자 번호판을 _positional_hangul_recovery 가 3자리로 교정한다.
+
+        '1234가5678' 은 PLATE_PATTERN 에 직접 매칭되지 않지만
+        _positional_hangul_recovery 가 '123사5678' 로 교정하여 반환한다.
+        교정 경유이므로 신뢰도 페널티 10% (× 0.9) 가 적용된다.
+        """
+        with self._patch_readtext([_easy_line("1234가5678", 0.80)]):
+            plate, conf = _run_easyocr_on_crop(self._IMG)
+        assert plate is not None, "positional recovery 경로에서 번호판을 찾지 못함"
+        assert PLATE_PATTERN.match(plate) is not None, f"교정 결과가 번호판 패턴 불일치: {plate}"
+        # avg_conf = 0.80, 페널티 10% → 0.72
+        assert abs(conf - 0.80 * 0.9) < 1e-5, f"10% 페널티 적용 후 conf={conf}, 기대={0.80 * 0.9}"
+
+    def test_positional_recovery_conf_is_lower_than_input(self):
+        """교정 경유 결과의 conf 는 원본 avg_conf 보다 낮아야 한다."""
+        input_conf = 0.75
+        with self._patch_readtext([_easy_line("1234가5678", input_conf)]):
+            plate, conf = _run_easyocr_on_crop(self._IMG)
+        if plate is not None:
+            assert conf < input_conf, f"교정 페널티 미적용: conf({conf}) >= input_conf({input_conf})"
+
+    # ── 오류 처리 ──
+
+    def test_empty_numpy_array_returns_none_zero(self):
+        """빈 numpy 배열 입력 시 reader 를 초기화하지 않고 (None, 0.0) 을 반환해야 한다."""
+        with patch("services.ocr_storage._get_easyocr_reader") as mock_get:
+            plate, conf = _run_easyocr_on_crop(np.array([]))
+        assert plate is None
+        assert conf == 0.0
+        mock_get.assert_not_called()  # 빈 이미지에서 reader 초기화 불필요
+
+    def test_none_input_returns_none_zero(self):
+        """None 입력 시 reader 초기화 없이 (None, 0.0) 을 반환해야 한다."""
+        with patch("services.ocr_storage._get_easyocr_reader") as mock_get:
+            plate, conf = _run_easyocr_on_crop(None)
+        assert plate is None
+        assert conf == 0.0
+        mock_get.assert_not_called()
+
+    def test_no_valid_plate_pattern_returns_none_zero(self):
+        """PLATE_PATTERN 에 매칭되지 않는 텍스트만 있을 때 (None, 0.0) 을 반환한다."""
+        with self._patch_readtext([_easy_line("ABCXYZ", 0.70)]):
+            plate, conf = _run_easyocr_on_crop(self._IMG)
+        assert plate is None, f"패턴 불일치 시 None 이어야 함: {plate}"
+        assert conf == 0.0
+
+    def test_pure_garbage_text_returns_none_zero(self):
+        """숫자·한글이 전혀 없는 텍스트도 (None, 0.0) 을 반환한다."""
+        with self._patch_readtext([_easy_line("!!@@##", 0.60)]):
+            plate, conf = _run_easyocr_on_crop(self._IMG)
+        assert plate is None
+        assert conf == 0.0
+
+    def test_readtext_raises_exception_returns_none_zero(self):
+        """reader.readtext 가 예외를 발생시킬 때 예외를 전파하지 않고 (None, 0.0) 을 반환한다."""
+        with self._patch_readtext(side_effect=RuntimeError("GPU 오류")):
+            plate, conf = _run_easyocr_on_crop(self._IMG)
+        assert plate is None, "예외 발생 시 None 이어야 함"
+        assert conf == 0.0
+
+    def test_readtext_empty_list_returns_none_zero(self):
+        """reader.readtext 가 빈 리스트를 반환할 때 (None, 0.0) 을 반환한다."""
+        with self._patch_readtext([]):
+            plate, conf = _run_easyocr_on_crop(self._IMG)
+        assert plate is None
+        assert conf == 0.0
+
+    # ── 경계 조건 ──
+
+    def test_single_pixel_image_does_not_raise(self):
+        """1x1 이미지 (size > 0) 는 예외 없이 처리되어야 한다."""
+        tiny = np.zeros((1, 1, 3), dtype=np.uint8)
+        with self._patch_readtext([]):
+            plate, conf = _run_easyocr_on_crop(tiny)
+        assert plate is None
+        assert conf == 0.0
+
+    def test_conf_penalty_result_is_non_negative(self):
+        """교정 페널티 적용 후 conf 가 음수가 되어서는 안 된다.
+
+        '1234가5678' 입력에 매우 낮은 conf(0.01) 를 사용하여
+        avg_conf * 0.9 계산 후에도 0 이상임을 확인한다.
+        """
+        with self._patch_readtext([_easy_line("1234가5678", 0.01)]):
+            plate, conf = _run_easyocr_on_crop(self._IMG)
+        if plate is not None:
+            assert conf >= 0.0, f"페널티 적용 후 conf 가 음수여서는 안 됨: {conf}"
+
+    def test_only_digits_input_returns_none_zero(self):
+        """숫자만으로 구성된 텍스트는 번호판으로 인식되지 않아야 한다."""
+        with self._patch_readtext([_easy_line("123456", 0.90)]):
+            plate, conf = _run_easyocr_on_crop(self._IMG)
+        assert plate is None
+        assert conf == 0.0
