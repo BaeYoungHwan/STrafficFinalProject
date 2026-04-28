@@ -29,6 +29,10 @@ public class SensorIngestItemDTO {
     public void setRecordedAt(LocalDateTime recordedAt) { this.recordedAt = recordedAt; }
 
     public boolean isValid() {
-        return equipmentId != null && equipmentId >= 1 && equipmentId <= 10000;
+        if (equipmentId == null || equipmentId < 1 || equipmentId > 10000) return false;
+        if (vibration != null && vibration.doubleValue() > 20.0) return false;
+        if (temperature != null && temperature.doubleValue() > 200.0) return false;
+        if (motorCurrent != null && motorCurrent.doubleValue() > 100.0) return false;
+        return true;
     }
 }

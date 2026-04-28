@@ -103,6 +103,11 @@ public class PredictiveController {
     public ResponseEntity<Map<String, Object>> predict(@RequestBody SensorIngestRequest request) {
         Map<String, Object> result = new LinkedHashMap<>();
         try {
+            if (request == null || request.getItems() == null || request.getItems().isEmpty()) {
+                result.put("success", false);
+                result.put("message", "items가 비어있습니다.");
+                return ResponseEntity.badRequest().body(result);
+            }
             var predictions = mlClient.predict(request.getItems());
             result.put("success", true);
             result.put("data", predictions.values());
