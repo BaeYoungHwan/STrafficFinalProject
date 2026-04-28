@@ -132,7 +132,7 @@
       <!-- 액션 버튼 -->
       <div class="action-bar">
         <button class="action-btn action-alert" @click="sendAlert">🔔 알림 발송</button>
-        <button class="action-btn action-resolve" @click="resolveEquipment" v-if="equipment.riskLevel === 'CRITICAL'">✅ 수동 해제</button>
+        <button class="action-btn action-resolve" @click="resolveEquipment" v-if="equipment.riskLevel === 'CRITICAL'">✅ 수리 완료</button>
       </div>
     </template>
   </div>

@@ -12,6 +12,8 @@ import psycopg2
 
 from services.predictive.config import (
     EQUIPMENT_PLAN,
+    NUM_EQUIPMENT,
+    RUL_MAX_DAYS,
     PATH_ACUTE,
     PATH_NORMAL,
     SPIKE_INTERVAL_MAX_SEC,
@@ -36,7 +38,7 @@ class EquipmentState:
 
     def health_ratio(self) -> float:
         """RUL 기반 건강도. 1.0(신품) ~ 0.0(수명끝)."""
-        return max(0.0, min(1.0, self.rul / 300.0))
+        return max(0.0, min(1.0, self.rul / RUL_MAX_DAYS))
 
 
 def load_initial_states(
@@ -55,7 +57,7 @@ def load_initial_states(
         cur = conn.cursor()
         cur.execute(
             "SELECT equipment_id, installation_date FROM equipment "
-            "WHERE equipment_id BETWEEN 1 AND 12 ORDER BY equipment_id"
+            f"WHERE equipment_id BETWEEN 1 AND {NUM_EQUIPMENT} ORDER BY equipment_id"
         )
         rows = cur.fetchall()
     finally:
@@ -71,14 +73,14 @@ def load_initial_states(
             path, planned = EQUIPMENT_PLAN[eq_id]
 
         elapsed_days = (today - install_date).days if install_date else 0
-        rul = max(0.0, 300.0 - elapsed_days)
+        rul = max(0.0, RUL_MAX_DAYS - elapsed_days)
 
         state = EquipmentState(
             equipment_id=eq_id,
             path=path,
             planned_fault=planned,
             rul=rul,
-            initial_rul=rul if rul > 0 else 300.0,
+            initial_rul=rul if rul > 0 else float(RUL_MAX_DAYS),
         )
 
         if path == PATH_ACUTE:
@@ -88,8 +90,8 @@ def load_initial_states(
 
         states.append(state)
 
-    if len(states) != 12:
-        logger.warning("[Simulator] 장비 수가 12 가 아님: %d", len(states))
+    if len(states) != NUM_EQUIPMENT:
+        logger.warning("[Simulator] 장비 수가 %d 가 아님: %d", NUM_EQUIPMENT, len(states))
 
     logger.info("[Simulator] 초기 상태 로딩 완료 — %d대", len(states))
     for s in states:
@@ -102,8 +104,8 @@ def load_initial_states(
 
 def reset_state(state: EquipmentState) -> None:
     """자동 정비 완료 후 상태 리셋."""
-    state.rul = 300.0
-    state.initial_rul = 300.0
+    state.rul = float(RUL_MAX_DAYS)
+    state.initial_rul = float(RUL_MAX_DAYS)
     state.spike_active = False
     state.spike_remaining_sec = 0.0
     if state.path == PATH_ACUTE:
