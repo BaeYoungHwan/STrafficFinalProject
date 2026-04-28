@@ -38,8 +38,9 @@ public class EquipmentStateMachineService {
         }
 
         if (isAnomaly) {
-            LocalDateTime start = anomalyStartMap.putIfAbsent(equipmentId, LocalDateTime.now());
-            if (start == null) start = anomalyStartMap.get(equipmentId);
+            LocalDateTime now = LocalDateTime.now();
+            LocalDateTime start = anomalyStartMap.putIfAbsent(equipmentId, now);
+            if (start == null) start = now;
 
             long elapsed = ChronoUnit.SECONDS.between(start, LocalDateTime.now());
             if (elapsed >= T_MINUTE_SECONDS) {

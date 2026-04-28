@@ -49,6 +49,9 @@ EQUIPMENT_PLAN = {
     12: (PATH_ACUTE,   FAULT_COMPOUND),
 }
 
+NUM_EQUIPMENT = len(EQUIPMENT_PLAN)
+RUL_MAX_DAYS = 300
+
 # ====================================================================
 # 정상 분포 (base, noise_sigma, diurnal_amp, load_amp)
 #   — 3층 변동 구조: base + N(0,σ) + diurnal_sin + load_sin
