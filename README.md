@@ -293,7 +293,7 @@ STrafficFinalProject/
 | 단속 내역 | `/enforcement` | 완료 |
 | 예지보전 | `/predictive` | 완료 |
 | 예지보전 상세 | `/predictive/:id` | 완료 |
-| 통계 | `/statistics` | 개발 예정 |
+| 통계 | `/statistics` | 완료 |
 
 ---
 
