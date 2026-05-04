@@ -79,21 +79,46 @@
 
 ---
 
-## 화면 구성 및 스크린샷
+## 화면 구성
 
-| 화면 | 경로 | 미리보기 |
-|------|------|---------|
-| 로그인 | `/login` | — |
-| 회원가입 | `/signup` | — |
-| ID/비번 찾기 | `/find-account` | — |
-| 대시보드 | `/` | ![대시보드](assets/screenshots/screenshot_dashboard.png) |
-| 마이페이지 | `/mypage` | — |
-| 교통 신호 제어 | `/traffic` | ![교통신호제어](assets/screenshots/screenshot_traffic.png) |
-| CCTV 모니터링 | `/cctv` | ![CCTV](assets/screenshots/screenshot_cctv.png) |
-| 단속 내역 | `/enforcement` | ![단속내역](assets/screenshots/screenshot_enforcement.png) |
-| 예지보전 | `/predictive` | ![예지보전](assets/screenshots/screenshot_predictive.png) |
-| 예지보전 상세 | `/predictive/:id` | ![예지보전상세](assets/screenshots/screenshot_predictive_detail.png) |
-| 통계 | `/statistics` | ![통계](assets/screenshots/screenshot_statistics.png) |
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <b>대시보드</b><br/>
+      <sub><code>/</code></sub><br/><br/>
+      <img src="assets/screenshots/dashboard.png" alt="대시보드" width="100%"/>
+    </td>
+    <td align="center" width="50%">
+      <b>CCTV 모니터링</b><br/>
+      <sub><code>/cctv</code></sub><br/><br/>
+      <img src="assets/screenshots/cctv.png" alt="CCTV 모니터링" width="100%"/>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <b>단속 내역</b><br/>
+      <sub><code>/enforcement</code></sub><br/><br/>
+      <img src="assets/screenshots/enforcement.png" alt="단속 내역" width="100%"/>
+    </td>
+    <td align="center">
+      <b>예지보전</b><br/>
+      <sub><code>/predictive</code></sub><br/><br/>
+      <img src="assets/screenshots/predictive.png" alt="예지보전" width="100%"/>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <b>예지보전 상세</b><br/>
+      <sub><code>/predictive/:id</code></sub><br/><br/>
+      <img src="assets/screenshots/predictive_detail.png" alt="예지보전 상세" width="100%"/>
+    </td>
+    <td align="center">
+      <b>통계</b><br/>
+      <sub><code>/statistics</code></sub><br/><br/>
+      <img src="assets/screenshots/statistics.png" alt="통계" width="100%"/>
+    </td>
+  </tr>
+</table>
 
 ---
 
