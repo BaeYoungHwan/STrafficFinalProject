@@ -16,7 +16,10 @@
             e.equipment_id                                                      AS id,
             'CAM' || LPAD(e.equipment_id::text, 2, '0')                         AS name,
             COALESCE(e.risk_level, 'LOW')                                       AS risk_level,
-            GREATEST(0, 300 - (CURRENT_DATE - e.installation_date))::int        AS rul,
+            CASE
+                WHEN e.risk_level = 'CRITICAL' THEN LEAST(3, GREATEST(0, 300 - (CURRENT_DATE - e.installation_date)))
+                ELSE GREATEST(0, 300 - (CURRENT_DATE - e.installation_date))
+            END::int                                                                AS rul,
             COALESCE(e.status, '정상가동')                                       AS status,
             COALESCE(s.motor_current, 0)                                        AS motor_current,
             COALESCE(s.vibration, 0)                                            AS vibration,

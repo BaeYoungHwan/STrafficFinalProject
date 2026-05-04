@@ -390,9 +390,7 @@ const updateStatus = async (newStatus) => {
 
 onMounted(() => {
   fetchList()
-  streamUrl.value = import.meta.env.DEV
-    ? (import.meta.env.VITE_FASTAPI_LINE_URL || 'http://localhost:8001') + '/api/v1/stream/video'
-    : '/ai-line/api/v1/stream/video'
+  streamUrl.value = '/ai-line/api/v1/stream/video'
 })
 </script>
 

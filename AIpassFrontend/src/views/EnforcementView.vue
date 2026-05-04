@@ -129,7 +129,7 @@
             <div class="image-box-label">차량 전체</div>
             <img
               v-if="selectedItem.srcImageUrl"
-              :src="(selectedItem.violationType === 'LINE_CROSSING_VIOLATION' ? '/ai-line/images/' : '/ai/images/') + selectedItem.srcImageUrl"
+              :src="(selectedItem.violationType === '실선 침범' ? '/ai-line/images/' : '/ai/images/') + selectedItem.srcImageUrl"
               alt="차량 전체 사진"
               @error="$event.target.style.display='none'"
             />
@@ -139,7 +139,7 @@
             <div class="image-box-label">번호판 크롭</div>
             <img
               v-if="selectedItem.imageUrl"
-              :src="(selectedItem.violationType === 'LINE_CROSSING_VIOLATION' ? '/ai-line/images/' : '/ai/images/') + selectedItem.imageUrl"
+              :src="(selectedItem.violationType === '실선 침범' ? '/ai-line/images/' : '/ai/images/') + selectedItem.imageUrl"
               alt="번호판"
               @error="$event.target.style.display='none'"
             />
@@ -276,19 +276,13 @@ const streamTitle = ref('실시간 과속 감지 모니터')
 
 function openSpeedStream() {
   streamTitle.value = '실시간 과속 감지 모니터'
-  const base = import.meta.env.DEV
-    ? (import.meta.env.VITE_FASTAPI_SPEED_URL || 'http://localhost:8000') + '/api/v1/stream/video'
-    : '/ai/api/v1/stream/video'
-  streamUrl.value = base + '?t=' + Date.now()
+  streamUrl.value = '/ai/api/v1/stream/video?t=' + Date.now()
   showStreamModal.value = true
 }
 
 function openLineStream() {
   streamTitle.value = '실시간 실선침범 감지 모니터'
-  const base = import.meta.env.DEV
-    ? (import.meta.env.VITE_FASTAPI_LINE_URL || 'http://localhost:8001') + '/api/v1/stream/video'
-    : '/ai-line/api/v1/stream/video'
-  streamUrl.value = base + '?t=' + Date.now()
+  streamUrl.value = '/ai-line/api/v1/stream/video?t=' + Date.now()
   showStreamModal.value = true
 }
 

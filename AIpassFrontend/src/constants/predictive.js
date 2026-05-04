@@ -30,10 +30,9 @@ export const RUL_THRESHOLDS = {
 }
 
 export function formatRul(rul) {
-  if (rul <= RUL_THRESHOLDS.CRITICAL) return '3일 이내'
-  if (rul <= RUL_THRESHOLDS.HIGH)     return `약 ${rul}일`
-  if (rul <= RUL_THRESHOLDS.MEDIUM)   return `약 ${rul}일`
-  return '300일 이상'
+  if (rul == null) return '-'
+  if (rul <= RUL_THRESHOLDS.CRITICAL) return `${rul}일 이내`
+  return `약 ${rul}일`
 }
 
 export function getRulColor(rul) {

@@ -12,7 +12,7 @@ from core.config import settings
 from services.predictive.client import predictive_client
 from services.predictive.config import DEFAULT_END_TIME_ISO, TICK_SECONDS
 from services.predictive.simulator import Simulator
-from services.predictive.state import load_initial_states
+from services.predictive.state import load_initial_states, reset_state
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +102,16 @@ async def start_simulator() -> None:
     await predictive_client.start()
     _loop_task = asyncio.create_task(_simulator_loop(), name="simulator_loop")
     logger.info("[Simulator] 가동 완료 — %d대 장비", len(states))
+
+
+def reset_equipment(equipment_id: int) -> bool:
+    if _simulator is None:
+        return False
+    for state in _simulator.states:
+        if state.equipment_id == equipment_id:
+            reset_state(state)
+            return True
+    return False
 
 
 async def stop_simulator() -> None:
