@@ -160,7 +160,7 @@
               </div>
               <div class="sub-divider"></div>
               <div class="sub-item">
-                <span class="sub-label">기타</span>
+                <span class="sub-label">실선</span>
                 <span class="sub-val other">{{ violation.otherCount ?? '--' }}</span>
               </div>
             </div>
