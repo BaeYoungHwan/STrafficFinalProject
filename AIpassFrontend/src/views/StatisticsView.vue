@@ -29,10 +29,6 @@
           <div class="chart-label">유형별 단속</div>
           <div class="chart-box square"><canvas ref="violationTypeRef"></canvas></div>
         </div>
-        <div class="chart-card">
-          <div class="chart-label">교차로별 단속 현황</div>
-          <div class="chart-box"><canvas ref="violationIntersectionRef"></canvas></div>
-        </div>
       </div>
     </div>
 
@@ -47,27 +43,6 @@
         <div class="chart-card narrow">
           <div class="chart-label">위험도 분포</div>
           <div class="chart-box square"><canvas ref="riskRef"></canvas></div>
-        </div>
-        <div class="chart-card narrow">
-          <div class="chart-label">장비 운용 현황</div>
-          <div class="stat-cards">
-            <div class="stat-item">
-              <span class="stat-value">{{ operation.avg_days ?? '-' }}</span>
-              <span class="stat-label">평균 운용일</span>
-            </div>
-            <div class="stat-item">
-              <span class="stat-value">{{ operation.min_days ?? '-' }}</span>
-              <span class="stat-label">최소</span>
-            </div>
-            <div class="stat-item">
-              <span class="stat-value">{{ operation.max_days ?? '-' }}</span>
-              <span class="stat-label">최대</span>
-            </div>
-            <div class="stat-item">
-              <span class="stat-value">{{ operation.total ?? '-' }}</span>
-              <span class="stat-label">총 장비 수</span>
-            </div>
-          </div>
         </div>
       </div>
     </div>
@@ -131,12 +106,10 @@ const trafficHourlyRef = ref(null)
 const trafficCongestionRef = ref(null)
 const violationDailyRef = ref(null)
 const violationTypeRef = ref(null)
-const violationIntersectionRef = ref(null)
 const anomalyRef = ref(null)
 const riskRef = ref(null)
 const weatherTrendRef = ref(null)
 
-const operation = ref({})
 const currentWeather = ref(null)
 
 const charts = []
@@ -145,17 +118,15 @@ function addChart(c) { if (c) charts.push(c) }
 
 async function fetchAndDraw() {
   const [
-    hourly, congestion, daily, vType, vInter,
-    anomaly, risk, oper, wTrend, wCurrent
+    hourly, congestion, daily, vType,
+    anomaly, risk, wTrend, wCurrent
   ] = await Promise.allSettled([
     api.get('/statistics/traffic/hourly'),
     api.get('/statistics/traffic/congestion'),
     api.get('/statistics/violation/daily'),
     api.get('/statistics/violation/type'),
-    api.get('/statistics/violation/intersection'),
     api.get('/statistics/predictive/anomaly'),
     api.get('/statistics/predictive/risk'),
-    api.get('/statistics/predictive/operation'),
     api.get('/statistics/weather/trend'),
     api.get('/statistics/weather/current'),
   ])
@@ -233,23 +204,6 @@ async function fetchAndDraw() {
     }))
   }
 
-  // 단속 - 교차로별
-  const vi = d(vInter)
-  if (vi.length && violationIntersectionRef.value) {
-    addChart(new Chart(violationIntersectionRef.value, {
-      type: 'bar',
-      data: {
-        labels: vi.map(r => r.label),
-        datasets: [{
-          label: '단속 건수',
-          data: vi.map(r => r.value),
-          backgroundColor: COLORS.orange + '80',
-          borderRadius: 4,
-        }],
-      },
-      options: { ...chartOpts('건'), indexAxis: 'y' },
-    }))
-  }
 
   // 예지보전 - 이상 빈도
   const an = d(anomaly)
@@ -284,10 +238,6 @@ async function fetchAndDraw() {
       options: doughnutOpts(),
     }))
   }
-
-  // 예지보전 - 운용일수
-  const op = d(oper)
-  if (op.length) operation.value = op[0]
 
   // 날씨 - 추이
   const wt = d(wTrend)
