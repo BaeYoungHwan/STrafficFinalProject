@@ -1,6 +1,18 @@
-# AIpass — 스마트 교차로 무인 단속 및 예지보전 모니터링 시스템
+<div align="center">
+  <img src="AIpassFrontend/src/assets/logos/AI-PASS_LOGO.png" alt="AIpass Logo" width="180"/>
+  <h1>AIpass</h1>
+  <p><strong>스마트 교차로 무인 단속 및 예지보전 모니터링 시스템</strong></p>
 
-실시간 CCTV 영상 분석으로 과속·실선침범 차량을 자동 단속하고, 교통 인프라 장비의 예지보전을 지원하는 스마트 교차로 통합 관리 플랫폼입니다.
+  ![Vue 3](https://img.shields.io/badge/Vue-3.x-42b883?logo=vue.js&logoColor=white)
+  ![Spring Boot](https://img.shields.io/badge/Spring_Boot-3.x-6DB33F?logo=springboot&logoColor=white)
+  ![FastAPI](https://img.shields.io/badge/FastAPI-0.11x-009688?logo=fastapi&logoColor=white)
+  ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)
+  ![YOLO](https://img.shields.io/badge/YOLO-ultralytics-FF6600?logo=yolo&logoColor=white)
+</div>
+
+---
+
+실시간 CCTV 영상 분석으로 **과속·실선침범 차량을 자동 단속**하고, 교통 인프라 장비의 **예지보전**을 지원하는 스마트 교차로 통합 관리 플랫폼입니다.
 
 ---
 
@@ -9,7 +21,7 @@
 | 이름 | 역할 |
 |------|------|
 | 배영환 | PM / AI 서버 전체 (FastAPI, YOLO, OCR, 예지보전 ML) / 과속·실선침범 단속 / 대시보드 / CCTV / 단속 내역 / 교통 신호 제어 화면 |
-| 김소연 | DB 설계 (ERD, 14개 테이블) / 화면 기획·UX |
+| 김소연 | DB 설계 (ERD, 14개 테이블) / 화면 기획·UX / 통계 화면 |
 | 하재영 | 로그인·회원가입·마이페이지 화면 / 예지보전 화면 |
 
 ---
@@ -67,6 +79,24 @@
 
 ---
 
+## 화면 구성 및 스크린샷
+
+| 화면 | 경로 | 미리보기 |
+|------|------|---------|
+| 로그인 | `/login` | — |
+| 회원가입 | `/signup` | — |
+| ID/비번 찾기 | `/find-account` | — |
+| 대시보드 | `/` | ![대시보드](assets/screenshots/screenshot_dashboard.png) |
+| 마이페이지 | `/mypage` | — |
+| 교통 신호 제어 | `/traffic` | ![교통신호제어](assets/screenshots/screenshot_traffic.png) |
+| CCTV 모니터링 | `/cctv` | ![CCTV](assets/screenshots/screenshot_cctv.png) |
+| 단속 내역 | `/enforcement` | ![단속내역](assets/screenshots/screenshot_enforcement.png) |
+| 예지보전 | `/predictive` | ![예지보전](assets/screenshots/screenshot_predictive.png) |
+| 예지보전 상세 | `/predictive/:id` | ![예지보전상세](assets/screenshots/screenshot_predictive_detail.png) |
+| 통계 | `/statistics` | ![통계](assets/screenshots/screenshot_statistics.png) |
+
+---
+
 ## 주요 기능
 
 ### 과속 단속 자동화 (`FEATURE_MODE=SPEED`)
@@ -85,7 +115,7 @@
 2. 야간 대비 CLAHE 보정 후 OCR (PaddleOCR)
 3. HSV 컨투어 기반 번호판 영역 탐지 후 OCR (PaddleOCR)
 4. 슬라이딩 윈도우 OCR (PaddleOCR Legacy)
-5. EasyOCR 폴백 (Stage 8)
+5. EasyOCR 폴백
 
 ### 혼잡도 분석
 | 레벨 | 조건 | 표시 |
@@ -276,38 +306,7 @@ STrafficFinalProject/
 | 센서 | `/api/sensor/ingest` | 센서 배치 수집 + ML 클라이언트 호출 |
 | 알림 | `/api/notifications/*` | SSE 스트림 (하트비트), 최근 50건 조회 |
 | 예지보전 | `/api/predictive/*` | 장비 목록/상세/센서 로그/상태 리셋 |
-
----
-
-## 화면 구성
-
-| 화면 | 경로 | 상태 |
-|------|------|------|
-| 로그인 | `/login` | 완료 |
-| 회원가입 | `/signup` | 완료 |
-| ID/비번 찾기 | `/find-account` | 완료 |
-| 대시보드 | `/` | 완료 |
-| 마이페이지 | `/mypage` | 완료 |
-| 교통 신호 제어 | `/traffic` | 완료 |
-| CCTV 모니터링 | `/cctv` | 완료 |
-| 단속 내역 | `/enforcement` | 완료 |
-| 예지보전 | `/predictive` | 완료 |
-| 예지보전 상세 | `/predictive/:id` | 완료 |
-| 통계 | `/statistics` | 완료 |
-
----
-
-## 화면 스크린샷
-
-> 스크린샷은 추후 업데이트 예정입니다.
-
-| 화면 | 미리보기 |
-|------|---------|
-| 대시보드 | — |
-| CCTV 모니터링 | — |
-| 단속 내역 | — |
-| 교통 신호 제어 | — |
-| 예지보전 | — |
+| 통계 | `/api/statistics/*` | 교통·단속·예지보전·날씨 통계 집계 |
 
 ---
 
