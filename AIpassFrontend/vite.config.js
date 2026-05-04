@@ -16,15 +16,15 @@ export default defineConfig(({ mode }) => {
           target: backendUrl,
           changeOrigin: true
         },
-        '/ai': {
-          target: speedApiUrl,
-          changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/ai/, '')
-        },
         '/ai-line': {
           target: lineApiUrl,
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/ai-line/, '')
+        },
+        '/ai': {
+          target: speedApiUrl,
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/ai/, '')
         }
       }
     }
