@@ -52,21 +52,6 @@
         </table>
       </div>
 
-      <!-- AI 잔여수명 예측 -->
-      <div class="section-card">
-        <h3 class="section-title">AI 잔여수명 예측</h3>
-        <button class="predict-btn" :disabled="rulPredicting" @click="predictRul">
-          <span>⚡</span>
-          {{ rulPredicting ? 'AI 분석 중...' : 'AI 잔여수명 예측' }}
-        </button>
-        <div v-if="rulResult" class="rul-result">
-          <span class="rul-grade-badge" :style="{ color: getRiskConfig(rulResult.grade).color, background: getRiskConfig(rulResult.grade).bg }">
-            {{ getRiskConfig(rulResult.grade).label }}
-          </span>
-          <span class="rul-days">잔여 수명 약 <strong>{{ rulResult.rul }}</strong>일</span>
-        </div>
-      </div>
-
       <!-- 센서 추이 그래프 -->
       <div class="section-card">
         <div class="chart-header">
@@ -104,34 +89,8 @@
         </div>
       </div>
 
-      <!-- 정비 기록 -->
-      <div class="section-card">
-        <h3 class="section-title">정비 기록</h3>
-        <table v-if="maintenanceHistory.length > 0" class="history-table">
-          <thead>
-            <tr><th>No.</th><th>상태</th><th>담당자</th><th>접수일</th><th>완료일</th></tr>
-          </thead>
-          <tbody>
-            <tr v-for="(h, idx) in maintenanceHistory" :key="h.ticket_id">
-              <td>{{ idx + 1 }}</td>
-              <td>
-                <span class="status-tag" :style="{
-                  color: h.repair_status === '완료' ? '#10B981' : '#F59E0B',
-                  background: h.repair_status === '완료' ? 'rgba(16,185,129,0.15)' : 'rgba(245,158,11,0.15)'
-                }">{{ h.repair_status }}</span>
-              </td>
-              <td>{{ h.reported_by ?? '-' }}</td>
-              <td>{{ h.created_at ?? '-' }}</td>
-              <td>{{ h.resolved_at ?? '-' }}</td>
-            </tr>
-          </tbody>
-        </table>
-        <div v-else class="empty-chart">정비 기록이 없습니다.</div>
-      </div>
-
       <!-- 액션 버튼 -->
       <div class="action-bar">
-        <button class="action-btn action-alert" @click="sendAlert">🔔 알림 발송</button>
         <button class="action-btn action-resolve" @click="resolveEquipment" v-if="equipment.riskLevel === 'CRITICAL'">✅ 수리 완료</button>
       </div>
     </template>
