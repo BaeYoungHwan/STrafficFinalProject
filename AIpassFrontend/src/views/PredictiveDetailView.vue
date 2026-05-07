@@ -174,7 +174,14 @@ function makeChart(canvasRef, label, data, labels, color) {
       maintainAspectRatio: false,
       plugins: { legend: { display: false } },
       scales: {
-        x: { ticks: { color: '#9CA3AF', font: { size: 10 }, maxTicksLimit: 12 }, grid: { color: '#F3F4F6' } },
+        x: {
+          ticks: {
+            color: '#9CA3AF',
+            font: { size: 10 },
+            maxTicksLimit: chartRange.value === 168 ? 7 : chartRange.value === 24 ? 8 : 6,
+          },
+          grid: { color: '#F3F4F6' },
+        },
         y: { ticks: { color: '#9CA3AF', font: { size: 10 } }, grid: { color: '#F3F4F6' } },
       },
     },
@@ -188,7 +195,10 @@ async function initCharts() {
 
   await nextTick()
   const h = sensorHistory.value
-  const labels = h.map(d => String(d.recorded_at || '').substring(11, 16))
+  const fmt = chartRange.value <= 24
+    ? (s) => s.substring(11, 16)
+    : (s) => s.substring(5, 10)
+  const labels = h.map(d => fmt(String(d.recorded_at || '')))
 
   chartMotor = makeChart(chartMotorRef.value, '모터전류', h.map(d => d.motor_current), labels, '#1A6DCC')
   chartVibration = makeChart(chartVibrationRef.value, '진동', h.map(d => d.vibration), labels, '#F59E0B')
